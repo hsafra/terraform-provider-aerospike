@@ -27,13 +27,13 @@ type AerospikeProvider struct {
 
 // AerospikeProviderModel describes the provider data model.
 type AerospikeProviderModel struct {
-	seedHost    types.String `tfsdk:"seed_host"`
-	port        types.Int64  `tfsdk:"port"`
-	userName    types.String `tfsdk:"user_name"`
-	password    types.String `tfsdk:"password"`
-	tlsEnabled  types.Bool   `tfsdk:"tls_enabled"`
-	tlsName     types.String `tfsdk:"tls_name"`
-	tlsCertPath types.String `tfsdk:"tls_cert"`
+	Host     types.String `tfsdk:"host"`
+	Port     types.Int64  `tfsdk:"port"`
+	UserName types.String `tfsdk:"user_name"`
+	Password types.String `tfsdk:"password"`
+	//tlsEnabled  types.Bool   `tfsdk:"tls_enabled"`
+	//tlsName     types.String `tfsdk:"tls_name"`
+	//tlsCertPath types.String `tfsdk:"tls_cert"`
 }
 
 type asConnection struct {
@@ -65,23 +65,23 @@ func (p *AerospikeProvider) Schema(ctx context.Context, req provider.SchemaReque
 				Required:    true,
 				Sensitive:   true,
 			},
-			"tls": schema.SingleNestedAttribute{
-				Attributes: map[string]schema.Attribute{
-					"enabled": schema.BoolAttribute{
-						Description: "Use tls?",
-						Optional:    true,
-					},
-					"name": schema.StringAttribute{
-						Description: "tls name to use",
-						Optional:    true,
-					},
-					"cert_path": schema.StringAttribute{
-						Description: "tls certificate path",
-						Optional:    true,
-					},
-				},
-				Optional: true,
-			},
+			//"tls": schema.SingleNestedAttribute{
+			//	Attributes: map[string]schema.Attribute{
+			//		"enabled": schema.BoolAttribute{
+			//			Description: "Use tls?",
+			//			Optional:    true,
+			//		},
+			//		"name": schema.StringAttribute{
+			//			Description: "tls name to use",
+			//			Optional:    true,
+			//		},
+			//		"cert_path": schema.StringAttribute{
+			//			Description: "tls certificate path",
+			//			Optional:    true,
+			//		},
+			//	},
+			//	Optional: true,
+			//},
 		},
 	}
 }
@@ -90,6 +90,7 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 	var data AerospikeProviderModel
 	var err error
 	var asConn asConnection
+	var tempConn as.ClientIfc
 
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 
@@ -113,18 +114,20 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 	cp.Timeout = 3 * time.Second
 
 	ash := as.NewHost(host, port)
-	*asConn.client, err = as.CreateClientWithPolicyAndHost(as.CTNative, cp, ash)
+	tempConn, err = as.CreateClientWithPolicyAndHost(as.CTNative, cp, ash)
 	if err != nil {
 		panic(err)
 	}
 
-	resp.DataSourceData = asConn
-	resp.ResourceData = asConn
+	asConn.client = &tempConn
+
+	resp.DataSourceData = &asConn
+	resp.ResourceData = &asConn
 }
 
 func (p *AerospikeProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewExampleResource,
+		NewAerospikeUser,
 	}
 }
 
