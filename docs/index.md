@@ -13,7 +13,7 @@ description: |-
 ## Example Usage
 
 ```terraform
-provider "scaffolding" {
+provider "aerospike" {
   # example configuration here
 }
 ```
@@ -27,16 +27,3 @@ provider "scaffolding" {
 - `password` (String, Sensitive) Admin password
 - `port` (Number) Port to connect to
 - `user_name` (String) Admin username
-
-### Optional
-
-- `tls` (Attributes) (see [below for nested schema](#nestedatt--tls))
-
-<a id="nestedatt--tls"></a>
-### Nested Schema for `tls`
-
-Optional:
-
-- `cert_path` (String) tls certificate path
-- `enabled` (Boolean) Use tls?
-- `name` (String) tls name to use
