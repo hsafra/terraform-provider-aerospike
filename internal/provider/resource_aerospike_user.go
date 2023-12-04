@@ -199,7 +199,7 @@ func (r *AerospikeUser) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	if !reflect.DeepEqual(stateRoles, planRoles) {
 		// change in roles
-
+		//TODO: find the roles grant and revoke and call grantroles & revokeroles
 	}
 
 	// Save updated data into Terraform state
