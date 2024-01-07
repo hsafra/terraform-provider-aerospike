@@ -251,5 +251,5 @@ func (r *AerospikeUser) Delete(ctx context.Context, req resource.DeleteRequest, 
 }
 
 func (r *AerospikeUser) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	resource.ImportStatePassthroughID(ctx, path.Root("user_name"), req, resp)
 }
