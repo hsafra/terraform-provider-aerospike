@@ -1,4 +1,4 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) Harel Safra
 // SPDX-License-Identifier: MPL-2.0
 
 package main

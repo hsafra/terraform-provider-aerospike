@@ -4,6 +4,7 @@ go 1.19
 
 require (
 	github.com/aerospike/aerospike-client-go/v6 v6.14.1
+	github.com/ghetzel/go-stockutil v1.11.4
 	github.com/hashicorp/terraform-plugin-docs v0.16.0
 	github.com/hashicorp/terraform-plugin-framework v1.4.2
 	github.com/hashicorp/terraform-plugin-go v0.19.1
@@ -21,7 +22,10 @@ require (
 	github.com/armon/go-radix v1.0.0 // indirect
 	github.com/bgentry/speakeasy v0.1.0 // indirect
 	github.com/cloudflare/circl v1.3.3 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fatih/color v1.13.0 // indirect
+	github.com/fatih/structs v1.1.0 // indirect
+	github.com/ghetzel/uuid v0.0.0-20171129191014-dec09d789f3d // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/uuid v1.3.1 // indirect
@@ -45,6 +49,9 @@ require (
 	github.com/hashicorp/yamux v0.0.0-20181012175058-2f1d1f20f75d // indirect
 	github.com/huandu/xstrings v1.3.2 // indirect
 	github.com/imdario/mergo v0.3.15 // indirect
+	github.com/jbenet/go-base58 v0.0.0-20150317085156-6237cf65f3a6 // indirect
+	github.com/jdkato/prose v1.2.1 // indirect
+	github.com/juliangruber/go-intersect v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/mitchellh/cli v1.1.5 // indirect
@@ -76,4 +83,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231127180814-3a041ad873d4 // indirect
 	google.golang.org/grpc v1.59.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
+	gopkg.in/neurosnap/sentences.v1 v1.0.7 // indirect
+	k8s.io/client-go v0.24.1 // indirect
 )

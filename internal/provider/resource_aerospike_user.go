@@ -1,4 +1,4 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) Harel Safra
 // SPDX-License-Identifier: MPL-2.0
 
 package provider
@@ -8,6 +8,7 @@ import (
 	"fmt"
 	as "github.com/aerospike/aerospike-client-go/v6"
 	astypes "github.com/aerospike/aerospike-client-go/v6/types"
+	"github.com/ghetzel/go-stockutil/sliceutil"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -183,6 +184,7 @@ func (r *AerospikeUser) Update(ctx context.Context, req resource.UpdateRequest, 
 		if err != nil {
 			panic(err)
 		}
+		tflog.Trace(ctx, "Changed password for "+data.User_name.ValueString())
 	}
 
 	planRoles := make([]string, 0)
@@ -197,9 +199,30 @@ func (r *AerospikeUser) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 	sort.Strings(stateRoles)
 
-	if !reflect.DeepEqual(stateRoles, planRoles) {
+	if !reflect.DeepEqual(planRoles, stateRoles) {
 		// change in roles
-		//TODO: find the roles grant and revoke and call grantroles & revokeroles
+		tflog.Trace(ctx, "Diff in roles, plan: "+strings.Join(planRoles, ", ")+", state: "+strings.Join(stateRoles, ", "))
+		intersection := sliceutil.IntersectStrings(stateRoles, planRoles)
+		rolesToAdd := sliceutil.Stringify(sliceutil.Difference(planRoles, intersection))
+		rolesToRevoke := sliceutil.Stringify(sliceutil.Difference(stateRoles, intersection))
+		tflog.Trace(ctx, "Roles to add: "+strings.Join(rolesToAdd, ", "))
+		tflog.Trace(ctx, "Roles to revoke: "+strings.Join(rolesToRevoke, ", "))
+
+		adminPol := as.NewAdminPolicy()
+
+		if len(rolesToAdd) > 0 {
+			err := (*r.asConn.client).GrantRoles(adminPol, plan.User_name.ValueString(), rolesToAdd)
+			if err != nil {
+				panic(err)
+			}
+		}
+		if len(rolesToRevoke) > 0 {
+			err := (*r.asConn.client).RevokeRoles(adminPol, plan.User_name.ValueString(), rolesToRevoke)
+			if err != nil {
+				panic(err)
+			}
+		}
+		data.Roles = plan.Roles
 	}
 
 	// Save updated data into Terraform state
