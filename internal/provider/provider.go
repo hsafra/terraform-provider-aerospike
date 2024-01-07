@@ -6,10 +6,12 @@ package provider
 import (
 	"context"
 	as "github.com/aerospike/aerospike-client-go/v6"
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"time"
 )
@@ -55,6 +57,9 @@ func (p *AerospikeProvider) Schema(ctx context.Context, req provider.SchemaReque
 			"port": schema.Int64Attribute{
 				Description: "Port to connect to",
 				Required:    true,
+				Validators: []validator.Int64{
+					int64validator.Between(0, 65535),
+				},
 			},
 			"user_name": schema.StringAttribute{
 				Description: "Admin username",
@@ -103,17 +108,17 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 
 	// Example client configuration for data sources and resources
 
-	user := "admin"
-	password := "admin"
-	host := "127.0.0.1"
-	port := 3000
+	user := data.UserName.ValueString()
+	password := data.Password.ValueString()
+	host := data.Host.ValueString()
+	port := data.Port.ValueInt64()
 
 	cp := as.NewClientPolicy()
 	cp.User = user
 	cp.Password = password
 	cp.Timeout = 3 * time.Second
 
-	ash := as.NewHost(host, port)
+	ash := as.NewHost(host, int(port))
 	tempConn, err = as.CreateClientWithPolicyAndHost(as.CTNative, cp, ash)
 	if err != nil {
 		panic(err)
