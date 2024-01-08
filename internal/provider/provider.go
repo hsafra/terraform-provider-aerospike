@@ -52,22 +52,22 @@ func (p *AerospikeProvider) Schema(ctx context.Context, req provider.SchemaReque
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
 				Description: "Seed host to connect to",
-				Required:    true,
+				Optional:    true,
 			},
 			"port": schema.Int64Attribute{
 				Description: "Port to connect to",
-				Required:    true,
+				Optional:    true,
 				Validators: []validator.Int64{
 					int64validator.Between(0, 65535),
 				},
 			},
 			"user_name": schema.StringAttribute{
 				Description: "Admin username",
-				Required:    true,
+				Optional:    true,
 			},
 			"password": schema.StringAttribute{
 				Description: "Admin password",
-				Required:    true,
+				Optional:    true,
 				Sensitive:   true,
 			},
 			//"tls": schema.SingleNestedAttribute{
@@ -103,15 +103,10 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 		return
 	}
 
-	// Configuration values are now available.
-	// if data.Endpoint.IsNull() { /* ... */ }
-
-	// Example client configuration for data sources and resources
-
-	user := data.UserName.ValueString()
-	password := data.Password.ValueString()
-	host := data.Host.ValueString()
-	port := data.Port.ValueInt64()
+	user := withEnvironmentOverrideString(data.UserName.ValueString(), "AEROSPIKE_USER")
+	password := withEnvironmentOverrideString(data.Password.ValueString(), "AEROSPIKE_PASSWORD")
+	host := withEnvironmentOverrideString(data.Host.ValueString(), "AEROSPIKE_HOST")
+	port := withEnvironmentOverrideInt64(data.Port.ValueInt64(), "AEROSPIKE_PORT")
 
 	cp := as.NewClientPolicy()
 	cp.User = user
