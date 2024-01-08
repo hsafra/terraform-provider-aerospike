@@ -1,3 +1,3 @@
 resource "aerospike_user" "example" {
-  configurable_attribute = "some-value"
+  user_name = "some-value"
 }
