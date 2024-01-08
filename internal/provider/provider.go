@@ -128,6 +128,7 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 func (p *AerospikeProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewAerospikeUser,
+		NewAerospikeRole,
 	}
 }
 
