@@ -28,12 +28,10 @@ func TestAccAerospikeUser(t *testing.T) {
 }
 
 func testAccAerospikeUserConfig(userName string, password string, roles string) string {
-	tmp := fmt.Sprintf(`
+	return fmt.Sprintf(`
 resource "aerospike_user" "%[1]s" {
   user_name = "%[1]s"
   password  = "%[2]s"
   roles = [%[3]s]
 }`, userName, password, roles)
-
-	return tmp
 }
