@@ -199,6 +199,8 @@ func (r *AerospikeUser) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 	sort.Strings(stateRoles)
 
+	data.Roles = state.Roles
+
 	if !reflect.DeepEqual(planRoles, stateRoles) {
 		// change in roles
 		tflog.Trace(ctx, "Diff in roles, plan: "+strings.Join(planRoles, ", ")+", state: "+strings.Join(stateRoles, ", "))

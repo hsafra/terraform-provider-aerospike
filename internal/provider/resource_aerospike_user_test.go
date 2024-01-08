@@ -23,6 +23,14 @@ func TestAccAerospikeUser(t *testing.T) {
 					resource.TestCheckResourceAttr("aerospike_user.testuser1", "password", "testpass1"),
 				),
 			},
+			// update password
+			{
+				Config: testAccAerospikeUserConfig("testuser1", "testpass2", "\"role1\""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_user.testuser1", "user_name", "testuser1"),
+					resource.TestCheckResourceAttr("aerospike_user.testuser1", "password", "testpass2"),
+				),
+			},
 		},
 	})
 }
