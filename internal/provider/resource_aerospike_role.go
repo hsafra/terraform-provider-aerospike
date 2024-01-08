@@ -85,6 +85,7 @@ func (r *AerospikeRole) Schema(ctx context.Context, req resource.SchemaRequest, 
 						"set": schema.StringAttribute{
 							Description: "Set. Optional - if empty the privilege will apply to all sets",
 							Optional:    true,
+							//TODO: require namespace if set is set
 						},
 					},
 				},
@@ -184,6 +185,8 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	adminPol := as.NewAdminPolicy()
+
+	//TODO: check that namspaces mentioned in privileges exists
 
 	err := (*r.asConn.client).CreateRole(adminPol, roleName, privileges, whiteList,
 		readQuota, writeQuota)
