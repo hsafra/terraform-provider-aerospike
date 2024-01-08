@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"strings"
 )
@@ -44,7 +45,7 @@ type AerospikeRoleModel struct {
 type AerospikeRolePrivilegeModel struct {
 	Privilege types.String `tfsdk:"privilege"`
 	Namespace types.String `tfsdk:"namespace"`
-	Set_name  types.String `tfsdk:"set"`
+	Set       types.String `tfsdk:"set"`
 }
 
 func (r *AerospikeRole) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -139,43 +140,44 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 	readQuota := uint32(data.Read_quota.ValueInt64())
 	writeQuota := uint32(data.Write_quota.ValueInt64())
 
-	elements := make([]types.Object, 0, len(data.Privileges.Elements()))
-	data.Privileges.ElementsAs(ctx, &elements, false)
-	a, _ := elements[0].ToTerraformValue(ctx)
-	a.
-		b := a.String()
-	fmt.Println(b)
-
+	privElements := make([]types.Object, 0, len(data.Privileges.Elements()))
+	data.Privileges.ElementsAs(ctx, &privElements, false)
+	/*	var rrr AerospikeRolePrivilegeModel
+		a := elements[0].As(ctx, &rrr, basetypes.ObjectAsOptions{})
+		fmt.Println(a)
+	*/
 	printPrivs := make([]string, 0)
 	privileges := make([]as.Privilege, 0)
-	/*	for _, p := range privElements {
-			// very ugly hack since privilegeCode isn't exported and I couldn't find anything else that worked :(
-			tmpPriv := as.Privilege{}
+	for _, p := range privElements {
+		var privModel AerospikeRolePrivilegeModel
+		p.As(ctx, &privModel, basetypes.ObjectAsOptions{})
 
-				switch p.Privilege.ValueString() {
-				case "user-admin":
-					tmpPriv = as.Privilege{as.UserAdmin, p.Namespace.ValueString(), p.Set_name.ValueString()}
-				case "sys-admin":
-					tmpPriv = as.Privilege{as.SysAdmin, p.Namespace.ValueString(), p.Set_name.ValueString()}
-				case "data-admin":
-					tmpPriv = as.Privilege{as.DataAdmin, p.Namespace.ValueString(), p.Set_name.ValueString()}
-				case "udf-admin":
-					tmpPriv = as.Privilege{as.UDFAdmin, p.Namespace.ValueString(), p.Set_name.ValueString()}
-				case "sindex-admin":
-					tmpPriv = as.Privilege{as.SIndexAdmin, p.Namespace.ValueString(), p.Set_name.ValueString()}
-				case "read-write-udf":
-					tmpPriv = as.Privilege{as.ReadWriteUDF, p.Namespace.ValueString(), p.Set_name.ValueString()}
-				case "read":
-					tmpPriv = as.Privilege{as.Read, p.Namespace.ValueString(), p.Set_name.ValueString()}
-				case "write":
-					tmpPriv = as.Privilege{as.Write, p.Namespace.ValueString(), p.Set_name.ValueString()}
-				case "truncate":
-					tmpPriv = as.Privilege{as.Truncate, p.Namespace.ValueString(), p.Set_name.ValueString()}
-				}
-			privileges = append(privileges, tmpPriv)
-			printPrivs = append(printPrivs, privToStr(tmpPriv))
+		// very ugly hack since privilegeCode isn't exported and I couldn't find anything else that worked :(
+		tmpPriv := as.Privilege{}
+		switch privModel.Privilege.ValueString() {
+		case "user-admin":
+			tmpPriv = as.Privilege{as.UserAdmin, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
+		case "sys-admin":
+			tmpPriv = as.Privilege{as.SysAdmin, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
+		case "data-admin":
+			tmpPriv = as.Privilege{as.DataAdmin, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
+		case "udf-admin":
+			tmpPriv = as.Privilege{as.UDFAdmin, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
+		case "sindex-admin":
+			tmpPriv = as.Privilege{as.SIndexAdmin, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
+		case "read-write-udf":
+			tmpPriv = as.Privilege{as.ReadWriteUDF, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
+		case "read":
+			tmpPriv = as.Privilege{as.Read, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
+		case "write":
+			tmpPriv = as.Privilege{as.Write, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
+		case "truncate":
+			tmpPriv = as.Privilege{as.Truncate, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
 		}
-	*/
+		privileges = append(privileges, tmpPriv)
+		printPrivs = append(printPrivs, privToStr(tmpPriv))
+	}
+
 	whiteList := make([]string, 0)
 	for _, w := range data.White_list {
 		whiteList = append(whiteList, w.ValueString())
