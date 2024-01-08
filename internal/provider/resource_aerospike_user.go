@@ -242,7 +242,7 @@ func (r *AerospikeUser) Delete(ctx context.Context, req resource.DeleteRequest, 
 	adminPol := as.NewAdminPolicy()
 
 	err := (*r.asConn.client).DropUser(adminPol, data.User_name.ValueString())
-	if err != nil {
+	if err != nil && !err.Matches(astypes.INVALID_USER) {
 		panic(err)
 	}
 
