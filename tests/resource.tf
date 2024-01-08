@@ -7,5 +7,5 @@ resource "aerospike_user" "test2" {
 resource "aerospike_user" "test3" {
   user_name = "test3"
   password  = "test3"
-  roles = ["role31"]
+  roles = ["role31","role32"]
 }
