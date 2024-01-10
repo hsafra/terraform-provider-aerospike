@@ -7,10 +7,14 @@ import (
 	"context"
 	"fmt"
 	as "github.com/aerospike/aerospike-client-go/v6"
+	astypes "github.com/aerospike/aerospike-client-go/v6/types"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -55,7 +59,7 @@ func (r *AerospikeRole) Metadata(ctx context.Context, req resource.MetadataReque
 func (r *AerospikeRole) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		// This description is used by the documentation generator and the language server.
-		MarkdownDescription: "Aerospike user",
+		Description: "Aerospike Role",
 
 		Attributes: map[string]schema.Attribute{
 			"role_name": schema.StringAttribute{
@@ -66,7 +70,7 @@ func (r *AerospikeRole) Schema(ctx context.Context, req resource.SchemaRequest, 
 				},
 			},
 			"privileges": schema.SetNestedAttribute{
-				Description: `Privilege set, comprised from {privilege="name",namespace="name",set="name"] maps. Namespace and Set ar optional`,
+				Description: `Privilege set, comprised from {privilege="name",namespace="name",set="name"] maps. Namespace and Set are optional`,
 				Required:    true,
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
@@ -79,13 +83,18 @@ func (r *AerospikeRole) Schema(ctx context.Context, req resource.SchemaRequest, 
 							},
 						},
 						"namespace": schema.StringAttribute{
-							Description: "Namespace. Optional - if empty the privilege will apply to all namespaces",
+							Description: "Namespace. Optional - if empty the privilege will apply to all namespaces. The namespace existence can't be checked. An invalid namespace will cause unexpected behaviour ",
 							Optional:    true,
 						},
 						"set": schema.StringAttribute{
-							Description: "Set. Optional - if empty the privilege will apply to all sets",
+							Description: "Set. Optional - if empty the privilege will apply to all sets. Must be used with namespace",
 							Optional:    true,
-							//TODO: require namespace if set is set
+							Validators: []validator.String{
+								// Validate this attribute must be configured with other_attr.
+								stringvalidator.AlsoRequires(path.Expressions{
+									path.MatchRelative().AtParent().AtName("namespace"),
+								}...),
+							},
 						},
 					},
 				},
@@ -98,10 +107,14 @@ func (r *AerospikeRole) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"read_quota": schema.Int64Attribute{
 				Description: "Read quota to apply to the role",
 				Optional:    true,
+				Computed:    true,
+				Default:     int64default.StaticInt64(0),
 			},
 			"write_quota": schema.Int64Attribute{
 				Description: "write quota to apply to the role",
 				Optional:    true,
+				Computed:    true,
+				Default:     int64default.StaticInt64(0),
 			},
 		},
 	}
@@ -129,6 +142,7 @@ func (r *AerospikeRole) Configure(ctx context.Context, req resource.ConfigureReq
 
 func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var data AerospikeRoleModel
+	adminPol := as.NewAdminPolicy()
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
@@ -143,38 +157,13 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 
 	privElements := make([]types.Object, 0, len(data.Privileges.Elements()))
 	data.Privileges.ElementsAs(ctx, &privElements, false)
-	/*	var rrr AerospikeRolePrivilegeModel
-		a := elements[0].As(ctx, &rrr, basetypes.ObjectAsOptions{})
-		fmt.Println(a)
-	*/
 	printPrivs := make([]string, 0)
 	privileges := make([]as.Privilege, 0)
 	for _, p := range privElements {
 		var privModel AerospikeRolePrivilegeModel
 		p.As(ctx, &privModel, basetypes.ObjectAsOptions{})
 
-		// very ugly hack since privilegeCode isn't exported and I couldn't find anything else that worked :(
-		tmpPriv := as.Privilege{}
-		switch privModel.Privilege.ValueString() {
-		case "user-admin":
-			tmpPriv = as.Privilege{as.UserAdmin, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
-		case "sys-admin":
-			tmpPriv = as.Privilege{as.SysAdmin, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
-		case "data-admin":
-			tmpPriv = as.Privilege{as.DataAdmin, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
-		case "udf-admin":
-			tmpPriv = as.Privilege{as.UDFAdmin, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
-		case "sindex-admin":
-			tmpPriv = as.Privilege{as.SIndexAdmin, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
-		case "read-write-udf":
-			tmpPriv = as.Privilege{as.ReadWriteUDF, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
-		case "read":
-			tmpPriv = as.Privilege{as.Read, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
-		case "write":
-			tmpPriv = as.Privilege{as.Write, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
-		case "truncate":
-			tmpPriv = as.Privilege{as.Truncate, privModel.Namespace.ValueString(), privModel.Set.ValueString()}
-		}
+		tmpPriv := asPrivFromStringValues(privModel.Privilege, privModel.Namespace, privModel.Set)
 		privileges = append(privileges, tmpPriv)
 		printPrivs = append(printPrivs, privToStr(tmpPriv))
 	}
@@ -183,10 +172,6 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 	for _, w := range data.White_list {
 		whiteList = append(whiteList, w.ValueString())
 	}
-
-	adminPol := as.NewAdminPolicy()
-
-	//TODO: check that namspaces mentioned in privileges exists
 
 	err := (*r.asConn.client).CreateRole(adminPol, roleName, privileges, whiteList,
 		readQuota, writeQuota)
@@ -204,6 +189,72 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 }
 
 func (r *AerospikeRole) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var data AerospikeRoleModel
+
+	// Read Terraform prior state data into the model
+	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	adminPol := as.NewAdminPolicy()
+
+	role, err := (*r.asConn.client).QueryRole(adminPol, data.Role_name.ValueString())
+	if err != nil && !err.Matches(astypes.INVALID_ROLE) {
+		panic(err)
+	}
+
+	if err != nil && err.Matches(astypes.INVALID_ROLE) {
+		data.Role_name = types.StringNull()
+		data.Privileges = types.SetNull(privObjectType())
+		data.White_list = nil
+		data.Read_quota = types.Int64Null()
+		data.Write_quota = types.Int64Null()
+
+		tflog.Trace(ctx, "read role "+data.Role_name.ValueString()+" and it does not exist")
+
+		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+
+		return
+	}
+
+	if len(role.Privileges) == 0 {
+		data.Privileges = types.SetNull(privObjectType())
+	} else {
+		privsAttrSlice := make([]attr.Value, 0)
+
+		for _, p := range role.Privileges {
+			priv, namespace, set := asPrivToStringValues(p)
+			privObject, _ := types.ObjectValue(map[string]attr.Type{"privilege": types.StringType, "namespace": types.StringType, "set": types.StringType},
+				map[string]attr.Value{"privilege": priv, "namespace": namespace, "set": set})
+			privsAttrSlice = append(privsAttrSlice, privObject)
+
+		}
+		var diags diag.Diagnostics
+		data.Privileges, diags = types.SetValue(privObjectType(), privsAttrSlice)
+		if diags.HasError() {
+			resp.Diagnostics = diags
+			return
+		}
+	}
+
+	if len(role.Whitelist) == 0 {
+		data.White_list = nil
+	} else {
+		data.White_list = make([]types.String, 0)
+		for _, w := range role.Whitelist {
+			data.White_list = append(data.White_list, types.StringValue(w))
+		}
+	}
+
+	data.Read_quota = types.Int64Value(int64(role.ReadQuota))
+	data.Write_quota = types.Int64Value(int64(role.WriteQuota))
+
+	tflog.Trace(ctx, "read role "+role.Name)
+
+	// Save updated data into Terraform state
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 
 }
 
@@ -221,4 +272,78 @@ func (r *AerospikeRole) ImportState(ctx context.Context, req resource.ImportStat
 
 func privToStr(privilege as.Privilege) string {
 	return "(" + string(privilege.Code) + "," + privilege.Namespace + "," + privilege.SetName + ")"
+}
+
+func asPrivFromStringValues(priv, namespace, set types.String) as.Privilege {
+	// ugly hack since privilegeCode isn't exported and I couldn't find anything else that worked :(
+	var tmpPriv as.Privilege
+	n := namespace.ValueString()
+	s := set.ValueString()
+	switch priv.ValueString() {
+	case "user-admin":
+		tmpPriv = as.Privilege{as.UserAdmin, n, s}
+	case "sys-admin":
+		tmpPriv = as.Privilege{as.SysAdmin, n, s}
+	case "data-admin":
+		tmpPriv = as.Privilege{as.DataAdmin, n, s}
+	case "udf-admin":
+		tmpPriv = as.Privilege{as.UDFAdmin, n, s}
+	case "sindex-admin":
+		tmpPriv = as.Privilege{as.SIndexAdmin, n, s}
+	case "read-write-udf":
+		tmpPriv = as.Privilege{as.ReadWriteUDF, n, s}
+	case "read":
+		tmpPriv = as.Privilege{as.Read, n, s}
+	case "write":
+		tmpPriv = as.Privilege{as.Write, n, s}
+	case "read-write":
+		tmpPriv = as.Privilege{as.ReadWrite, n, s}
+	case "truncate":
+		tmpPriv = as.Privilege{as.Truncate, n, s}
+	}
+	return tmpPriv
+}
+
+func asPrivToStringValues(priv as.Privilege) (types.String, types.String, types.String) {
+	var code string
+	var namespace, set types.String
+	switch priv.Code {
+	case as.UserAdmin:
+		code = "user-admin"
+	case as.SysAdmin:
+		code = "sys-admin"
+	case as.DataAdmin:
+		code = "data-admin"
+	case as.UDFAdmin:
+		code = "udf-admin"
+	case as.SIndexAdmin:
+		code = "sindex-admin"
+	case as.ReadWriteUDF:
+		code = "read-write-udf"
+	case as.Read:
+		code = "read"
+	case as.Write:
+		code = "write"
+	case as.ReadWrite:
+		code = "read-write"
+	case as.Truncate:
+		code = "truncate"
+	}
+
+	if priv.Namespace == "" {
+		namespace = types.StringNull()
+	} else {
+		namespace = types.StringValue(priv.Namespace)
+	}
+	if priv.SetName == "" {
+		set = types.StringNull()
+	} else {
+		set = types.StringValue(priv.SetName)
+	}
+
+	return types.StringValue(code), namespace, set
+}
+
+func privObjectType() types.ObjectType {
+	return types.ObjectType{map[string]attr.Type{"privilege": types.StringType, "namespace": types.StringType, "set": types.StringType}}
 }
