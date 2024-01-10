@@ -16,6 +16,9 @@ resource "aerospike_role" "role1" {
   privileges = [
     {
       privilege = "read"
+    },
+    {
+      privilege = "write"
     }
   ]
 }

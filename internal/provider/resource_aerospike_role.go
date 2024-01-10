@@ -8,6 +8,7 @@ import (
 	"fmt"
 	as "github.com/aerospike/aerospike-client-go/v6"
 	astypes "github.com/aerospike/aerospike-client-go/v6/types"
+	"github.com/ghetzel/go-stockutil/sliceutil"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -21,6 +22,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"reflect"
 	"strings"
 )
 
@@ -264,16 +266,94 @@ func (r *AerospikeRole) Read(ctx context.Context, req resource.ReadRequest, resp
 }
 
 func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data AerospikeRoleModel
+	var plan, state, data AerospikeRoleModel
 
-	// Read Terraform prior state data into the model
-	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+	// Read Terraform plan data into the model
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	//	adminPol := as.NewAdminPolicy()
+	adminPol := as.NewAdminPolicy()
+
+	data.Role_name = plan.Role_name
+
+	//privileges
+	if reflect.DeepEqual(plan.Privileges, state.Privileges) {
+		data.Privileges = plan.Privileges
+	} else {
+		planPrivElements := make([]types.Object, 0, len(data.Privileges.Elements()))
+		plan.Privileges.ElementsAs(ctx, &planPrivElements, false)
+
+		statePrivElements := make([]types.Object, 0, len(data.Privileges.Elements()))
+		state.Privileges.ElementsAs(ctx, &statePrivElements, false)
+
+		//TODO: sliceutll doesn't like objects. Replace is with loops :(
+		intersection := sliceutil.Intersect(planPrivElements, statePrivElements)
+		privsToAdd := sliceutil.Difference(planPrivElements, intersection)
+		privsToRevoke := sliceutil.Difference(statePrivElements, intersection)
+
+		if len(privsToAdd) > 0 {
+			/*			privileges := make([]as.Privilege, 0)
+						for _, p := range privsToAdd {
+							var privModel AerospikeRolePrivilegeModel
+							p.As(ctx, &privModel, basetypes.ObjectAsOptions{})
+
+							if !privModel.Namespace.IsNull() && !r.namespaceExists(privModel.Namespace.ValueString()) {
+								resp.Diagnostics.Append(diag.NewErrorDiagnostic("Invalid namesace", "Namespace \""+privModel.Namespace.ValueString()+"\" does not exist in the cluster. Can't create role referencing it"))
+								return
+							}
+
+							tmpPriv := asPrivFromStringValues(privModel.Privilege, privModel.Namespace, privModel.Set)
+							privileges = append(privileges, tmpPriv)
+
+						}
+						err := (*r.asConn.client).GrantRoles(adminPol, plan.User_name.ValueString(), rolesToAdd)
+						if err != nil {
+							panic(err)
+						}*/
+		}
+		if len(privsToRevoke) > 0 {
+			/*			err := (*r.asConn.client).RevokeRoles(adminPol, plan.User_name.ValueString(), rolesToRevoke)
+						if err != nil {
+							panic(err)
+						}*/
+		}
+
+		data.Privileges = plan.Privileges
+
+	}
+
+	//whitelist
+	if reflect.DeepEqual(plan.White_list, state.White_list) {
+		data.White_list = plan.White_list
+	} else {
+		whiteList := make([]string, 0)
+		for _, w := range plan.White_list {
+			whiteList = append(whiteList, w.ValueString())
+		}
+		err := (*r.asConn.client).SetWhitelist(adminPol, data.Role_name.ValueString(), whiteList)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	//qoutas
+	if plan.Read_quota == state.Read_quota && plan.Write_quota == state.Write_quota {
+		data.Read_quota = plan.Read_quota
+		data.Write_quota = plan.Write_quota
+	} else {
+		err := (*r.asConn.client).SetQuotas(adminPol, data.Role_name.ValueString(), uint32(plan.Read_quota.ValueInt64()),
+			uint32(plan.Write_quota.ValueInt64()))
+		if err != nil {
+			panic(err)
+		}
+
+		data.Read_quota = plan.Read_quota
+		data.Write_quota = plan.Write_quota
+	}
 
 }
 
