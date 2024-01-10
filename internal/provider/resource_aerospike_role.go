@@ -83,7 +83,7 @@ func (r *AerospikeRole) Schema(ctx context.Context, req resource.SchemaRequest, 
 							},
 						},
 						"namespace": schema.StringAttribute{
-							Description: "Namespace. Optional - if empty the privilege will apply to all namespaces. The namespace existence can't be checked. An invalid namespace will cause unexpected behaviour ",
+							Description: "Namespace. Optional - if empty the privilege will apply to all namespaces",
 							Optional:    true,
 						},
 						"set": schema.StringAttribute{
@@ -162,6 +162,11 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 	for _, p := range privElements {
 		var privModel AerospikeRolePrivilegeModel
 		p.As(ctx, &privModel, basetypes.ObjectAsOptions{})
+
+		if !privModel.Namespace.IsNull() && !r.namespaceExists(privModel.Namespace.ValueString()) {
+			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Invalid namesace", "Namespace \""+privModel.Namespace.ValueString()+"\" does not exist in the cluster. Can't create role referencing it"))
+			return
+		}
 
 		tmpPriv := asPrivFromStringValues(privModel.Privilege, privModel.Namespace, privModel.Set)
 		privileges = append(privileges, tmpPriv)
@@ -273,6 +278,24 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 }
 
 func (r *AerospikeRole) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var data AerospikeRoleModel
+
+	// Read Terraform prior state data into the model
+	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	adminPol := as.NewAdminPolicy()
+
+	err := (*r.asConn.client).DropRole(adminPol, data.Role_name.ValueString())
+	if err != nil && !err.Matches(astypes.INVALID_ROLE) {
+		panic(err)
+	}
+
+	// Write logs using the tflog package
+	tflog.Trace(ctx, "dropped role "+data.Role_name.ValueString())
 
 }
 
@@ -282,6 +305,15 @@ func (r *AerospikeRole) ImportState(ctx context.Context, req resource.ImportStat
 
 func privToStr(privilege as.Privilege) string {
 	return "(" + string(privilege.Code) + "," + privilege.Namespace + "," + privilege.SetName + ")"
+}
+
+func (r *AerospikeRole) namespaceExists(namespace string) bool {
+	key, _ := as.NewKey(namespace, "dummy", "dummy")
+
+	_, err := (*r.asConn.client).Get(nil, key)
+
+	return !err.Matches(astypes.INVALID_NAMESPACE)
+
 }
 
 func asPrivFromStringValues(priv, namespace, set types.String) as.Privilege {
