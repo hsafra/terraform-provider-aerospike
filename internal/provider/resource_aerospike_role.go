@@ -259,6 +259,16 @@ func (r *AerospikeRole) Read(ctx context.Context, req resource.ReadRequest, resp
 }
 
 func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var data AerospikeRoleModel
+
+	// Read Terraform prior state data into the model
+	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	//	adminPol := as.NewAdminPolicy()
 
 }
 
