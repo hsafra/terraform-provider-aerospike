@@ -10,6 +10,7 @@ resource "aerospike_user" "test3" {
   roles     = ["role31", "role32"]
 }
 */
+
 resource "aerospike_role" "role1" {
   role_name = "role1"
   privileges = [
@@ -24,7 +25,7 @@ resource "aerospike_role" "role2" {
   privileges = [
     {
       privilege = "read"
-      namespace="aerospike1"
+      namespace="aerospike"
       set="set1"
     }
   ]
