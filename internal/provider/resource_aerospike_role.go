@@ -182,7 +182,10 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 
 	err := (*r.asConn.client).CreateRole(adminPol, roleName, privileges, whiteList,
 		readQuota, writeQuota)
-	if err != nil {
+	if err != nil && err.Matches(astypes.QUOTAS_NOT_ENABLED) {
+		resp.Diagnostics.Append(diag.NewErrorDiagnostic("Quotas not enabled", "Role quotas are requests but not enabled in the server"))
+		return
+	} else if err != nil {
 		panic(err)
 	}
 
@@ -290,36 +293,55 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 		statePrivElements := make([]types.Object, 0, len(data.Privileges.Elements()))
 		state.Privileges.ElementsAs(ctx, &statePrivElements, false)
 
-		//TODO: sliceutll doesn't like objects. Replace is with loops :(
-		intersection := sliceutil.Intersect(planPrivElements, statePrivElements)
-		privsToAdd := sliceutil.Difference(planPrivElements, intersection)
-		privsToRevoke := sliceutil.Difference(statePrivElements, intersection)
+		planASPrivileges := make([]as.Privilege, 0)
+		for _, p := range planPrivElements {
+			var privModel AerospikeRolePrivilegeModel
+			p.As(ctx, &privModel, basetypes.ObjectAsOptions{})
+
+			if !privModel.Namespace.IsNull() && !r.namespaceExists(privModel.Namespace.ValueString()) {
+				resp.Diagnostics.Append(diag.NewErrorDiagnostic("Invalid namesace", "Namespace \""+privModel.Namespace.ValueString()+"\" does not exist in the cluster. Can't create role referencing it"))
+				return
+			}
+
+			tmpPriv := asPrivFromStringValues(privModel.Privilege, privModel.Namespace, privModel.Set)
+			planASPrivileges = append(planASPrivileges, tmpPriv)
+
+		}
+
+		stateASPrivileges := make([]as.Privilege, 0)
+		for _, p := range statePrivElements {
+			var privModel AerospikeRolePrivilegeModel
+			p.As(ctx, &privModel, basetypes.ObjectAsOptions{})
+
+			tmpPriv := asPrivFromStringValues(privModel.Privilege, privModel.Namespace, privModel.Set)
+			stateASPrivileges = append(stateASPrivileges, tmpPriv)
+		}
+
+		privsToAdd := make([]as.Privilege, 0)
+		for _, p := range planASPrivileges {
+			if !sliceutil.Contains(stateASPrivileges, p) {
+				privsToAdd = append(privsToAdd, p)
+			}
+		}
+
+		privsToRevoke := make([]as.Privilege, 0)
+		for _, p := range stateASPrivileges {
+			if !sliceutil.Contains(planASPrivileges, p) {
+				privsToRevoke = append(privsToRevoke, p)
+			}
+		}
 
 		if len(privsToAdd) > 0 {
-			/*			privileges := make([]as.Privilege, 0)
-						for _, p := range privsToAdd {
-							var privModel AerospikeRolePrivilegeModel
-							p.As(ctx, &privModel, basetypes.ObjectAsOptions{})
-
-							if !privModel.Namespace.IsNull() && !r.namespaceExists(privModel.Namespace.ValueString()) {
-								resp.Diagnostics.Append(diag.NewErrorDiagnostic("Invalid namesace", "Namespace \""+privModel.Namespace.ValueString()+"\" does not exist in the cluster. Can't create role referencing it"))
-								return
-							}
-
-							tmpPriv := asPrivFromStringValues(privModel.Privilege, privModel.Namespace, privModel.Set)
-							privileges = append(privileges, tmpPriv)
-
-						}
-						err := (*r.asConn.client).GrantRoles(adminPol, plan.User_name.ValueString(), rolesToAdd)
-						if err != nil {
-							panic(err)
-						}*/
+			err := (*r.asConn.client).GrantPrivileges(adminPol, plan.Role_name.ValueString(), privsToAdd)
+			if err != nil {
+				panic(err)
+			}
 		}
 		if len(privsToRevoke) > 0 {
-			/*			err := (*r.asConn.client).RevokeRoles(adminPol, plan.User_name.ValueString(), rolesToRevoke)
-						if err != nil {
-							panic(err)
-						}*/
+			err := (*r.asConn.client).RevokePrivileges(adminPol, plan.Role_name.ValueString(), privsToRevoke)
+			if err != nil {
+				panic(err)
+			}
 		}
 
 		data.Privileges = plan.Privileges
@@ -347,7 +369,10 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 	} else {
 		err := (*r.asConn.client).SetQuotas(adminPol, data.Role_name.ValueString(), uint32(plan.Read_quota.ValueInt64()),
 			uint32(plan.Write_quota.ValueInt64()))
-		if err != nil {
+		if err != nil && err.Matches(astypes.QUOTAS_NOT_ENABLED) {
+			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Quotas not enabled", "Role quotas are requests but not enabled in the server"))
+			return
+		} else if err != nil {
 			panic(err)
 		}
 

@@ -32,6 +32,7 @@ resource "aerospike_role" "role2" {
       set="set1"
     }
   ]
+  read_quota=10
 }
 /*
 resource "aerospike_role" "role3" {
