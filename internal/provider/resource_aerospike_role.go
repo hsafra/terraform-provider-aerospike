@@ -425,25 +425,25 @@ func asPrivFromStringValues(priv, namespace, set types.String) as.Privilege {
 	s := set.ValueString()
 	switch priv.ValueString() {
 	case "user-admin":
-		tmpPriv = as.Privilege{as.UserAdmin, n, s}
+		tmpPriv = as.Privilege{Code: as.UserAdmin, Namespace: n, SetName: s}
 	case "sys-admin":
-		tmpPriv = as.Privilege{as.SysAdmin, n, s}
+		tmpPriv = as.Privilege{Code: as.SysAdmin, Namespace: n, SetName: s}
 	case "data-admin":
-		tmpPriv = as.Privilege{as.DataAdmin, n, s}
+		tmpPriv = as.Privilege{Code: as.DataAdmin, Namespace: n, SetName: s}
 	case "udf-admin":
-		tmpPriv = as.Privilege{as.UDFAdmin, n, s}
+		tmpPriv = as.Privilege{Code: as.UDFAdmin, Namespace: n, SetName: s}
 	case "sindex-admin":
-		tmpPriv = as.Privilege{as.SIndexAdmin, n, s}
+		tmpPriv = as.Privilege{Code: as.SIndexAdmin, Namespace: n, SetName: s}
 	case "read-write-udf":
-		tmpPriv = as.Privilege{as.ReadWriteUDF, n, s}
+		tmpPriv = as.Privilege{Code: as.ReadWriteUDF, Namespace: n, SetName: s}
 	case "read":
-		tmpPriv = as.Privilege{as.Read, n, s}
+		tmpPriv = as.Privilege{Code: as.Read, Namespace: n, SetName: s}
 	case "write":
-		tmpPriv = as.Privilege{as.Write, n, s}
+		tmpPriv = as.Privilege{Code: as.Write, Namespace: n, SetName: s}
 	case "read-write":
-		tmpPriv = as.Privilege{as.ReadWrite, n, s}
+		tmpPriv = as.Privilege{Code: as.ReadWrite, Namespace: n, SetName: s}
 	case "truncate":
-		tmpPriv = as.Privilege{as.Truncate, n, s}
+		tmpPriv = as.Privilege{Code: as.Truncate, Namespace: n, SetName: s}
 	}
 	return tmpPriv
 }
@@ -489,5 +489,5 @@ func asPrivToStringValues(priv as.Privilege) (types.String, types.String, types.
 }
 
 func privObjectType() types.ObjectType {
-	return types.ObjectType{map[string]attr.Type{"privilege": types.StringType, "namespace": types.StringType, "set": types.StringType}}
+	return types.ObjectType{AttrTypes: map[string]attr.Type{"privilege": types.StringType, "namespace": types.StringType, "set": types.StringType}}
 }
