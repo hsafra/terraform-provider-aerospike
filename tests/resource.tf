@@ -1,4 +1,4 @@
-/*resource "aerospike_user" "test2" {
+resource "aerospike_user" "test2" {
   user_name = "test2"
   password  = "test24"
   roles     = ["role21", "role22"]
@@ -9,7 +9,7 @@ resource "aerospike_user" "test3" {
   password  = "test3"
   roles     = ["role31", "role32"]
 }
-*/
+
 
 resource "aerospike_role" "role1" {
   role_name = "role1"
@@ -32,14 +32,21 @@ resource "aerospike_role" "role2" {
       set="set1"
     }
   ]
-  read_quota=10
 }
-/*
+
 resource "aerospike_role" "role3" {
   role_name = "role3"
   privileges = [
     {
       privilege = "read"
+    },
+    {
+      privilege = "sys-admin"
+    },
+    {
+      privilege = "read-write"
+      namespace="aerospike"
+      set="harel"
     }
   ]
 }
@@ -51,5 +58,5 @@ resource "aerospike_role" "role6" {
       privilege = "read-write"
     }
   ]
+  white_list=["1.1.1.5","3.3.3.3"]
 }
-*/
