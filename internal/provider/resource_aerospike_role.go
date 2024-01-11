@@ -191,7 +191,7 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 
 	// Write logs using the tflog package
 	tflog.Trace(ctx, "created role: "+roleName+" with privileges: "+strings.Join(printPrivs, ", ")+" whitelist: "+
-		strings.Join(whiteList, ", ")+" read quota: "+string(readQuota)+" write quota:"+string(writeQuota))
+		strings.Join(whiteList, ", ")+" read quota: "+fmt.Sprint(readQuota)+" write quota:"+fmt.Sprint(writeQuota))
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

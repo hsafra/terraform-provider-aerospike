@@ -28,8 +28,8 @@ resource "aerospike_role" "role2" {
   privileges = [
     {
       privilege = "read"
-      namespace="aerospike"
-      set="set1"
+      namespace = "aerospike"
+      set       = "set1"
     }
   ]
 }
@@ -43,20 +43,12 @@ resource "aerospike_role" "role3" {
     {
       privilege = "sys-admin"
     },
-    {
-      privilege = "read-write"
-      namespace="aerospike"
-      set="harel"
-    }
+    { privilege = "read-write", namespace = "aerospike", set = "harel" }
   ]
 }
 
 resource "aerospike_role" "role6" {
-  role_name = "role6"
-  privileges = [
-    {
-      privilege = "read-write"
-    }
-  ]
-  white_list=["1.1.1.5","3.3.3.3"]
+  role_name  = "role6"
+  privileges = [{ privilege = "read-write" }]
+  white_list = ["1.1.1.5", "3.3.3.3"]
 }
