@@ -51,22 +51,22 @@ func (p *AerospikeProvider) Schema(ctx context.Context, req provider.SchemaReque
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
-				Description: "Seed host to connect to. Defaults to localhost",
+				Description: "Seed host to connect to. Defaults to the environment variable AEROSPIKE_HOST",
 				Optional:    true,
 			},
 			"port": schema.Int64Attribute{
-				Description: "Port to connect to. Defaults to 3000",
+				Description: "Port to connect to. Defaults to the environment variable AEROSPIKE_PORT",
 				Optional:    true,
 				Validators: []validator.Int64{
 					int64validator.Between(0, 65535),
 				},
 			},
 			"user_name": schema.StringAttribute{
-				Description: "Admin username. Defaults to admin",
+				Description: "Admin username. Defaults to the environment variable AEROSPIKE_USER",
 				Optional:    true,
 			},
 			"password": schema.StringAttribute{
-				Description: "Admin password. Defaults to admin",
+				Description: "Admin password. Defaults to the environment variable AEROSPIKE_PASSWORD",
 				Optional:    true,
 				Sensitive:   true,
 			},
