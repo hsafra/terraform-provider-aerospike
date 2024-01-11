@@ -349,9 +349,7 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	//whitelist
-	if reflect.DeepEqual(plan.White_list, state.White_list) {
-		data.White_list = plan.White_list
-	} else {
+	if !reflect.DeepEqual(plan.White_list, state.White_list) {
 		whiteList := make([]string, 0)
 		for _, w := range plan.White_list {
 			whiteList = append(whiteList, w.ValueString())
@@ -361,12 +359,10 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 			panic(err)
 		}
 	}
+	data.White_list = plan.White_list
 
 	//qoutas
-	if plan.Read_quota == state.Read_quota && plan.Write_quota == state.Write_quota {
-		data.Read_quota = plan.Read_quota
-		data.Write_quota = plan.Write_quota
-	} else {
+	if plan.Read_quota != state.Read_quota || plan.Write_quota != state.Write_quota {
 		err := (*r.asConn.client).SetQuotas(adminPol, data.Role_name.ValueString(), uint32(plan.Read_quota.ValueInt64()),
 			uint32(plan.Write_quota.ValueInt64()))
 		if err != nil && err.Matches(astypes.QUOTAS_NOT_ENABLED) {
@@ -375,11 +371,12 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 		} else if err != nil {
 			panic(err)
 		}
-
-		data.Read_quota = plan.Read_quota
-		data.Write_quota = plan.Write_quota
 	}
+	data.Read_quota = plan.Read_quota
+	data.Write_quota = plan.Write_quota
 
+	// Save updated data into Terraform state
+	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *AerospikeRole) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {

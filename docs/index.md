@@ -14,7 +14,10 @@ description: |-
 
 ```terraform
 provider "aerospike" {
-  # example configuration here
+  host      = "localhost"
+  user_name = "admin"
+  password  = "admin"
+  port      = 3000
 }
 ```
 
