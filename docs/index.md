@@ -23,7 +23,7 @@ provider "aerospike" {
 
 ### Optional
 
-- `host` (String) Seed host to connect to. Defaults to localhost
-- `password` (String, Sensitive) Admin password. Defaults to admin
-- `port` (Number) Port to connect to. Defaults to 3000
-- `user_name` (String) Admin username. Defaults to admin
+- `host` (String) Seed host to connect to. Defaults to the environment variable AEROSPIKE_HOST
+- `password` (String, Sensitive) Admin password. Defaults to the environment variable AEROSPIKE_PASSWORD
+- `port` (Number) Port to connect to. Defaults to the environment variable AEROSPIKE_PORT
+- `user_name` (String) Admin username. Defaults to the environment variable AEROSPIKE_USER
