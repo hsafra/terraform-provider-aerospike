@@ -1,4 +1,4 @@
-# Terraform Provider For Aerospike Objects
+# Terraform Provider For Aerospike Configuration and Objects
 
 Terraform provider for Aerospike objects, like users, roles, ... 
 This allows automating Aerospike objects as IaC, allowing reviewing changes and sharing config between environments easily 
@@ -15,6 +15,7 @@ Initialize the provider with connection parmaeter in the provider block or envir
 
 ## Future development
 - SSL connections
+- XDR filters
 - Secondary indexes
 
 ## Developing the Provider

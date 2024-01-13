@@ -28,8 +28,6 @@ resource "aerospike_role" "role2" {
   privileges = [
     {
       privilege = "read"
-      namespace = "aerospike"
-      set       = "set1"
     }
   ]
 }

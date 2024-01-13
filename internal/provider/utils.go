@@ -9,7 +9,8 @@ import (
 )
 
 func withEnvironmentOverrideString(currentValue, envOverrideKey string) string {
-	if envValue, ok := os.LookupEnv(envOverrideKey); ok {
+	envValue, ok := os.LookupEnv(envOverrideKey)
+	if ok {
 		return envValue
 	}
 
@@ -17,7 +18,8 @@ func withEnvironmentOverrideString(currentValue, envOverrideKey string) string {
 }
 
 func withEnvironmentOverrideInt64(currentValue int64, envOverrideKey string) int64 {
-	if envValue, ok := os.LookupEnv(envOverrideKey); ok {
+	envValue, ok := os.LookupEnv(envOverrideKey)
+	if ok {
 		n, err := strconv.Atoi(envValue)
 		if err == nil {
 			return (int64(n))
