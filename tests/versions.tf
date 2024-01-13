@@ -2,7 +2,7 @@ terraform {
   required_providers {
     aerospike = {
       source  = "hsafra/aerospike"
-      version = "1"
+      version = ">= 0.1.0"
     }
   }
   required_version = ">= 1.0.6"

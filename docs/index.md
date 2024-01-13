@@ -26,7 +26,17 @@ provider "aerospike" {
 
 ### Optional
 
+- `connect_timeout` (Number) Connect timeout. Defaults to the environment variable AEROSPIKE_CONNECT_TIMEOUT. Range is 1-60 seconds
 - `host` (String) Seed host to connect to. Defaults to the environment variable AEROSPIKE_HOST
 - `password` (String, Sensitive) Admin password. Defaults to the environment variable AEROSPIKE_PASSWORD
 - `port` (Number) Port to connect to. Defaults to the environment variable AEROSPIKE_PORT
+- `tls` (Attributes) (see [below for nested schema](#nestedatt--tls))
 - `user_name` (String) Admin username. Defaults to the environment variable AEROSPIKE_USER
+
+<a id="nestedatt--tls"></a>
+### Nested Schema for `tls`
+
+Optional:
+
+- `root_ca_file` (String) root CA tls certificate file
+- `tls_name` (String) tls name to use
