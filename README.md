@@ -14,7 +14,6 @@ This allows automating Aerospike objects as IaC, allowing reviewing changes and 
 Initialize the provider with connection parmaeter in the provider block or environment variables.
 
 ## Future development
-- SSL connections
 - XDR filters
 - Secondary indexes
 
