@@ -4,6 +4,7 @@ provider "aerospike" {
   password  = "admin"
   port      = 4333
   tls = {
-
+    tls_name = "aerospike"
+    root_ca_file="/Users/harel.safra/docker/aerospike_with_security/server.crt"
   }
 }
