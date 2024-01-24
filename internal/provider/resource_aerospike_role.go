@@ -182,11 +182,19 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 
 	err := (*r.asConn.client).CreateRole(adminPol, roleName, privileges, whiteList,
 		readQuota, writeQuota)
-	if err != nil && err.Matches(astypes.QUOTAS_NOT_ENABLED) {
-		resp.Diagnostics.Append(diag.NewErrorDiagnostic("Quotas not enabled", "Role quotas are requests but not enabled in the server"))
-		return
-	} else if err != nil {
-		panic(err)
+	if err != nil {
+		switch {
+		case err.Matches(astypes.QUOTAS_NOT_ENABLED):
+			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Quotas not enabled",
+				"Role quotas are requests but not enabled in the server"))
+			return
+		case err.Matches(astypes.ROLE_ALREADY_EXISTS):
+			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Role already exists",
+				"Role that was being created already exists: "+roleName))
+			return
+		default:
+			panic(err)
+		}
 	}
 
 	// Write logs using the tflog package

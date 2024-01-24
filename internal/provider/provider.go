@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	as "github.com/aerospike/aerospike-client-go/v6"
+	astypes "github.com/aerospike/aerospike-client-go/v6/types"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -108,7 +109,7 @@ func (p *AerospikeProvider) Schema(ctx context.Context, req provider.SchemaReque
 func (p *AerospikeProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
 	var data AerospikeProviderModel
 	var dataTLS AerospikeTLSConfigModel
-	var err error
+	var err as.Error
 	var asConn asConnection
 	var tempConn as.ClientIfc
 
@@ -184,7 +185,13 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 	}
 	tempConn, err = as.CreateClientWithPolicyAndHost(as.CTNative, cp, ash)
 	if err != nil {
-		panic(err)
+		if err.Matches(astypes.TIMEOUT) {
+			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Timeout connecting to Aerospike",
+				"Timeout connecting to Aerospike cluster "+host+" "+err.Error()))
+			return
+		} else {
+			panic(err)
+		}
 	}
 
 	asConn.client = &tempConn
