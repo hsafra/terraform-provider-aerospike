@@ -3,7 +3,7 @@ module terraform-provider-aerospike
 go 1.19
 
 require (
-	github.com/aerospike/aerospike-client-go/v6 v6.14.1
+	github.com/aerospike/aerospike-client-go/v6 v6.15.0
 	github.com/ghetzel/go-stockutil v1.11.4
 	github.com/hashicorp/terraform-plugin-docs v0.16.0
 	github.com/hashicorp/terraform-plugin-framework v1.4.2
@@ -62,7 +62,6 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/oklog/run v1.0.0 // indirect
-	github.com/onsi/ginkgo/v2 v2.13.0 // indirect
 	github.com/onsi/gomega v1.30.0 // indirect
 	github.com/posener/complete v1.2.3 // indirect
 	github.com/russross/blackfriday v1.6.0 // indirect
