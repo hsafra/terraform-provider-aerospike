@@ -96,6 +96,7 @@ jobs:
         run: |
           docker ps
           ss -l
+          sleep 30
           #go test -v -cover ./internal/provider/
           make testacc
         timeout-minutes: 10
