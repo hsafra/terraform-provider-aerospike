@@ -4,7 +4,7 @@ default: testacc
 
 AEROSPIKE_USER ?= admin
 AEROSPIKE_PASSWORD ?= admin
-AEROSPIKE_HOST ?= localhost
+AEROSPIKE_HOST ?= 127.0.0.1
 AEROSPIKE_PORT ?= 3000
 
 # Run acceptance tests
