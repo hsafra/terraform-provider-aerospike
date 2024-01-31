@@ -96,7 +96,7 @@ jobs:
         run: |
           docker ps
           ss -l
-          docker exec -it aerospike asadm -h localhost -U admin -P admin -e "show users"
+          docker exec aerospike asadm -h localhost -U admin -P admin -e "show users"
           #go test -v -cover ./internal/provider/
           make testacc
         timeout-minutes: 10
