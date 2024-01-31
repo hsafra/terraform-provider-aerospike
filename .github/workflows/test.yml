@@ -89,6 +89,7 @@ jobs:
         run: |
           pwd
           ls -l
+          ls -l ./tests
           docker run -d -v ./tests:/opt/aerospike/etc/ -e "FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf" --name aerospike -p 3000-3002:3000-3002 aerospike:${{ matrix.aerospike }} --config-file /opt/aerospike/etc/aerospike.conf
           docker ps
       - env:
