@@ -95,6 +95,7 @@ jobs:
           TF_ACC: "1"
         run: |
           docker ps
+          ss -l
           #go test -v -cover ./internal/provider/
           make testacc
         timeout-minutes: 10
