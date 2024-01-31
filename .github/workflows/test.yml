@@ -79,7 +79,12 @@ jobs:
           terraform_version: ${{ matrix.terraform }}
           terraform_wrapper: false
       - run: go mod download
-      - run:
+      - env:
+          AEROSPIKE_USER: admin
+          AEROSPIKE_PASSWORD: admin
+          AEROSPIKE_HOST: localhost
+          AEROSPIKE_PORT: 3000
+        run:
           docker run -d -v .:/opt/aerospike/etc/ -e "FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf" --name aerospike -p 3000-3002:3000-3002 aerospike:ee-6.2.0.7 --config-file /opt/aerospike/etc/aerospike.conf
       - env:
           TF_ACC: "1"
