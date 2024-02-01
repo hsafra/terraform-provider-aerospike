@@ -88,7 +88,7 @@ jobs:
           AEROSPIKE_HOST: localhost
           AEROSPIKE_PORT: 3000
         run: |
-          docker run -d -v ./tests:/opt/aerospike/etc/ -e "FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf" --name aerospike -p 3000-3002:3000-3002 aerospike:$(echo ${{ matrix.aerospike }} | cut -c 1-4) --config-file /opt/aerospike/etc/aerospike.conf
+          docker run -d -v ./tests:/opt/aerospike/etc/ -e "FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf" --name aerospike -p 3000-3002:3000-3002 aerospike:${{ matrix.aerospike }} --config-file /opt/aerospike/etc/aerospike$(echo ${{ matrix.aerospike }} | cut -c 1-4).conf
       - env:
           TF_ACC: "1"
         run: |
