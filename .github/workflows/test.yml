@@ -85,9 +85,9 @@ jobs:
       - id: get-major-ver
         run: |
           ver=$(echo ${{ matrix.aerospike }} | cut -c 1-4)
-          echo "::set-output name=ver::$ver"
+          echo "ver=${ver}" >> $GITHUB_OUTPUT
       - run: |
-          docker run -d -v ./tests:/opt/aerospike/etc/ -e "FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf" --name aerospike -p 3000-3002:3000-3002 aerospike:${{ matrix.aerospike }} --config-file /opt/aerospike/etc/aerospike${{ steps.get-major-ver.outputs.ver }}.conf
+          docker run -d -v ./tests:/opt/aerospike/etc/ -e "FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf" --name aerospike -p 3000-3002:3000-3002 aerospike:${{ matrix.aerospike }} --config-file /opt/aerospike/etc/aerospike-${{ steps.get-major-ver.outputs.ver }}.conf
       - env:
           TF_ACC: "1"
         run: |
