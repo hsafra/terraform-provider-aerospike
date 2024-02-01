@@ -10,4 +10,4 @@ AEROSPIKE_PORT ?= 3000
 # Run acceptance tests
 .PHONY: testacc
 testacc:
-	TF_ACC=1 go test ./... -v $(TESTARGS) -timeout 120m
+	TF_ACC=1 go test ./... -v -cover $(TESTARGS) -timeout 120m
