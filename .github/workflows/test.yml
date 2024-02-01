@@ -82,13 +82,12 @@ jobs:
           terraform_version: ${{ matrix.terraform }}
           terraform_wrapper: false
       - run: go mod download
-      - env:
-          AEROSPIKE_USER: admin
-          AEROSPIKE_PASSWORD: admin
-          AEROSPIKE_HOST: localhost
-          AEROSPIKE_PORT: 3000
+      - id: get-major-ver
         run: |
-          docker run -d -v ./tests:/opt/aerospike/etc/ -e "FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf" --name aerospike -p 3000-3002:3000-3002 aerospike:${{ matrix.aerospike }} --config-file /opt/aerospike/etc/aerospike$(echo ${{ matrix.aerospike }} | cut -c 1-4).conf
+          ver=$(echo ${{ matrix.aerospike }} | cut -c 1-4)
+          echo "::set-output name=ver::$ver"
+      - run: |
+          docker run -d -v ./tests:/opt/aerospike/etc/ -e "FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf" --name aerospike -p 3000-3002:3000-3002 aerospike:${{ matrix.aerospike }} --config-file /opt/aerospike/etc/aerospike${{ get-major-ver.ver }}.conf
       - env:
           TF_ACC: "1"
         run: |
