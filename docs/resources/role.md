@@ -49,5 +49,5 @@ Required:
 
 Optional:
 
-- `namespace` (String) Namespace. Optional - if empty the privilege will apply to all namespaces
-- `set` (String) Set. Optional - if empty the privilege will apply to all sets. Must be used with namespace
+- `namespace` (String) Namespace. Optional - if nulll the privilege will apply to all namespaces. must not be an empty string
+- `set` (String) Set. Optional - if null the privilege will apply to all sets. Must be used with namespace. Must not be an emptry string
