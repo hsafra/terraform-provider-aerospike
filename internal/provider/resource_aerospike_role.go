@@ -482,16 +482,8 @@ func asPrivToStringValues(priv as.Privilege) (types.String, types.String, types.
 		code = "truncate"
 	}
 
-	if priv.Namespace == "" {
-		namespace = types.StringNull()
-	} else {
-		namespace = types.StringValue(priv.Namespace)
-	}
-	if priv.SetName == "" {
-		set = types.StringNull()
-	} else {
-		set = types.StringValue(priv.SetName)
-	}
+	namespace = types.StringValue(priv.Namespace)
+	set = types.StringValue(priv.SetName)
 
 	return types.StringValue(code), namespace, set
 }
