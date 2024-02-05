@@ -85,17 +85,21 @@ func (r *AerospikeRole) Schema(ctx context.Context, req resource.SchemaRequest, 
 							},
 						},
 						"namespace": schema.StringAttribute{
-							Description: "Namespace. Optional - if empty the privilege will apply to all namespaces",
+							Description: "Namespace. Optional - if nulll the privilege will apply to all namespaces. must not be an empty string",
 							Optional:    true,
+							Validators: []validator.String{
+								stringvalidator.LengthAtLeast(1),
+							},
 						},
 						"set": schema.StringAttribute{
-							Description: "Set. Optional - if empty the privilege will apply to all sets. Must be used with namespace",
+							Description: "Set. Optional - if null the privilege will apply to all sets. Must be used with namespace. Must not be an emptry string",
 							Optional:    true,
 							Validators: []validator.String{
 								// Validate this attribute must be configured with other_attr.
 								stringvalidator.AlsoRequires(path.Expressions{
 									path.MatchRelative().AtParent().AtName("namespace"),
 								}...),
+								stringvalidator.LengthAtLeast(1),
 							},
 						},
 					},
@@ -482,8 +486,16 @@ func asPrivToStringValues(priv as.Privilege) (types.String, types.String, types.
 		code = "truncate"
 	}
 
-	namespace = types.StringValue(priv.Namespace)
-	set = types.StringValue(priv.SetName)
+	if priv.Namespace == "" {
+		namespace = types.StringNull()
+	} else {
+		namespace = types.StringValue(priv.Namespace)
+	}
+	if priv.SetName == "" {
+		set = types.StringNull()
+	} else {
+		set = types.StringValue(priv.SetName)
+	}
 
 	return types.StringValue(code), namespace, set
 }
