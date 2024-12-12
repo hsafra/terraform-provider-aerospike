@@ -6,7 +6,7 @@ toolchain go1.23.3
 
 require (
 	github.com/aerospike/aerospike-client-go/v6 v6.15.1
-	github.com/ghetzel/go-stockutil v1.12.1
+	github.com/ghetzel/go-stockutil v1.12.2
 	github.com/hashicorp/terraform-plugin-docs v0.20.1
 	github.com/hashicorp/terraform-plugin-framework v1.13.0
 	github.com/hashicorp/terraform-plugin-framework-validators v0.15.0
