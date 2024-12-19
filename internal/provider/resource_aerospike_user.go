@@ -6,8 +6,8 @@ package provider
 import (
 	"context"
 	"fmt"
-	as "github.com/aerospike/aerospike-client-go/v6"
-	astypes "github.com/aerospike/aerospike-client-go/v6/types"
+	as "github.com/aerospike/aerospike-client-go/v7"
+	astypes "github.com/aerospike/aerospike-client-go/v7/types"
 	"github.com/ghetzel/go-stockutil/sliceutil"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
