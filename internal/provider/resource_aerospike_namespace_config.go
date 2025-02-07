@@ -6,32 +6,23 @@ package provider
 import (
 	"context"
 	"fmt"
-	as "github.com/aerospike/aerospike-client-go/v7"
-	astypes "github.com/aerospike/aerospike-client-go/v7/types"
-	"github.com/ghetzel/go-stockutil/sliceutil"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/onsi/gomega/matchers/support/goraph/node"
-	"reflect"
 	"strconv"
 	"strings"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
 var _ resource.Resource = &AerospikeNamespaceConfig{}
-var _ resource.ResourceWithImportState = &AerospikeNamespaceConfig{}
 
 func NewAerospikeNamespaceConfig() resource.Resource {
 	return &AerospikeNamespaceConfig{}
@@ -46,9 +37,11 @@ type AerospikeNamespaceConfig struct {
 type AerospikeNamespaceConfigModel struct {
 	Namespace         types.String   `tfsdk:"namespace"`
 	Default_set_ttl   types.Map      `tfsdk:"default_set_ttl"`
+	XDR_datacenter    types.String   `tfsdk:"xdr_datacenter"`
 	XDR_include       []types.String `tfsdk:"xdr_include"`
 	XDR_exclude       []types.String `tfsdk:"xdr_exclude"`
 	Migartion_threads types.Int64    `tfsdk:"migartion_threads"`
+	Info_commands     []types.String `tfsdk:"info_commands"`
 }
 
 func (r *AerospikeNamespaceConfig) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -73,6 +66,16 @@ func (r *AerospikeNamespaceConfig) Schema(ctx context.Context, req resource.Sche
 				Optional:    true,
 				ElementType: types.StringType,
 			},
+			"xdr_datacenter": schema.StringAttribute{
+				Description: "The XDR datacenter to use for the namespace",
+				Optional:    true,
+				Validators: []validator.String{
+					stringvalidator.Any(
+						stringvalidator.AlsoRequires(path.MatchRoot("xdr_exclude")),
+						stringvalidator.AlsoRequires(path.MatchRoot("xdr_include")),
+					),
+				},
+			},
 			"xdr_include": schema.ListAttribute{
 				Description: "A list of sets to include in XDR",
 				Optional:    true,
@@ -92,6 +95,11 @@ func (r *AerospikeNamespaceConfig) Schema(ctx context.Context, req resource.Sche
 			"migartion_threads": schema.Int64Attribute{
 				Description: "The number of migration threads to use for the namespace",
 				Optional:    true,
+			},
+			"info_commands": schema.ListAttribute{
+				Description: "An output only list of asinfo compatible commands that were run",
+				ElementType: types.StringType,
+				Computed:    true,
 			},
 		},
 	}
@@ -145,12 +153,71 @@ func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.Crea
 			if err != nil {
 				panic(err)
 			}
+			data.Info_commands = append(data.Info_commands, types.StringValue(command))
 		}
 	}
 
+	if !(len(data.XDR_exclude) > 0) {
+		command := "set-config:context=xdr;dc=" + data.XDR_datacenter.ValueString() + ";namespace=" + namespace + ";ship-only-specified-sets=false"
+		_, err := sendInfoCommand(*r.asConn.client, command)
+		if err != nil {
+			panic(err)
+		}
+		data.Info_commands = append(data.Info_commands, types.StringValue(command))
+
+		//Admin+> asinfo -v "set-config:context=xdr;dc=dc2;namespace=example;ignore-set=set1"
+
+		sets := make([]string, 0, len(data.XDR_exclude))
+		for _, set := range data.XDR_exclude {
+			sets = append(sets, set.ValueString())
+		}
+
+		command = "set-config:context=xdr;dc=" + data.XDR_datacenter.ValueString() + ";namespace=" + namespace + ";ignore-set=" + strings.Join(sets, ",")
+
+		_, err = sendInfoCommand(*r.asConn.client, command)
+		if err != nil {
+			panic(err)
+		}
+		data.Info_commands = append(data.Info_commands, types.StringValue(command))
+	}
+
+	if !(len(data.XDR_include) > 0) {
+		command := "set-config:context=xdr;dc=" + data.XDR_datacenter.ValueString() + ";namespace=" + namespace + ";ship-only-specified-sets=true"
+		_, err := sendInfoCommand(*r.asConn.client, command)
+		if err != nil {
+			panic(err)
+		}
+		data.Info_commands = append(data.Info_commands, types.StringValue(command))
+
+		//Admin+> asinfo -v "set-config:context=xdr;dc=dc2;namespace=example;ship-set=set1"
+
+		sets := make([]string, 0, len(data.XDR_include))
+		for _, set := range data.XDR_include {
+			sets = append(sets, set.ValueString())
+		}
+
+		command = "set-config:context=xdr;dc=" + data.XDR_datacenter.ValueString() + ";namespace=" + namespace + ";ship-set=" + strings.Join(sets, ",")
+
+		_, err = sendInfoCommand(*r.asConn.client, command)
+		if err != nil {
+			panic(err)
+		}
+		data.Info_commands = append(data.Info_commands, types.StringValue(command))
+	}
+
+	if !data.Migartion_threads.IsNull() {
+		//asinfo -v "set-config:context=service;migrate-threads=0"
+
+		command := "set-config:context=servoce;migrate-threads=" + strconv.Itoa(int(data.Migartion_threads.ValueInt64()))
+		_, err := sendInfoCommand(*r.asConn.client, command)
+		if err != nil {
+			panic(err)
+		}
+		data.Info_commands = append(data.Info_commands, types.StringValue(command))
+	}
+
 	// Write logs using the tflog package
-	tflog.Trace(ctx, "created role: "+roleName+" with privileges: "+strings.Join(printPrivs, ", ")+" whitelist: "+
-		strings.Join(whiteList, ", ")+" read quota: "+fmt.Sprint(readQuota)+" write quota:"+fmt.Sprint(writeQuota))
+	tflog.Trace(ctx, "Applied namespace config to "+namespace)
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -158,7 +225,7 @@ func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.Crea
 }
 
 func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var data AerospikeRoleModel
+	var data AerospikeNamespaceConfigModel
 
 	// Read Terraform prior state data into the model
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
@@ -167,7 +234,7 @@ func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRe
 		return
 	}
 
-	tflog.Trace(ctx, "read role "+role.Name)
+	tflog.Trace(ctx, "read namespace config for namespace "+data.Namespace.ValueString())
 
 	// Save updated data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -175,7 +242,7 @@ func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRe
 }
 
 func (r *AerospikeNamespaceConfig) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan, state, data AerospikeRoleModel
+	var plan, state, data AerospikeNamespaceConfigModel
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -190,7 +257,7 @@ func (r *AerospikeNamespaceConfig) Update(ctx context.Context, req resource.Upda
 }
 
 func (r *AerospikeNamespaceConfig) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	var data AerospikeRoleModel
+	var data AerospikeNamespaceConfigModel
 
 	// Read Terraform prior state data into the model
 	resp.Diagnostics.Append(req.State.Get(ctx, &data)...)
@@ -200,6 +267,6 @@ func (r *AerospikeNamespaceConfig) Delete(ctx context.Context, req resource.Dele
 	}
 
 	// Write logs using the tflog package
-	tflog.Trace(ctx, "dropped role "+data.Role_name.ValueString())
+	tflog.Trace(ctx, "Deleted namespace config for "+data.Namespace.ValueString())
 
 }
