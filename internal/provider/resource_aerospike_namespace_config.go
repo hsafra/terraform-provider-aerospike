@@ -9,6 +9,7 @@ import (
 	as "github.com/aerospike/aerospike-client-go/v7"
 	astypes "github.com/aerospike/aerospike-client-go/v7/types"
 	"github.com/ghetzel/go-stockutil/sliceutil"
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -22,111 +23,80 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"github.com/onsi/gomega/matchers/support/goraph/node"
 	"reflect"
 	"strings"
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
-var _ resource.Resource = &AerospikeRole{}
-var _ resource.ResourceWithImportState = &AerospikeRole{}
+var _ resource.Resource = &AerospikeNamespaceConfig{}
+var _ resource.ResourceWithImportState = &AerospikeNamespaceConfig{}
 
-func NewAerospikeRole() resource.Resource {
-	return &AerospikeRole{}
+func NewAerospikeNamespaceConfig() resource.Resource {
+	return &AerospikeNamespaceConfig{}
 }
 
-// AerospikeRole defines the resource implementation.
-type AerospikeRole struct {
+// AerospikeNamespaceConfig defines the resource implementation.
+type AerospikeNamespaceConfig struct {
 	asConn *asConnection
 }
 
-// AerospikeRoleModel describes the resource data model.
-type AerospikeRoleModel struct {
-	Role_name   types.String   `tfsdk:"role_name"`
-	Privileges  types.Set      `tfsdk:"privileges"`
-	White_list  []types.String `tfsdk:"white_list"`
-	Read_quota  types.Int64    `tfsdk:"read_quota"`
-	Write_quota types.Int64    `tfsdk:"write_quota"`
+// AerospikeNamespaceConfigModel describes the resource data model.
+type AerospikeNamespaceConfigModel struct {
+	Namespace         types.String   `tfsdk:"namespace"`
+	Default_set_ttl   types.Map      `tfsdk:"default_set_ttl"`
+	XDR_include       []types.String `tfsdk:"xdr_include"`
+	XDR_exclude       []types.String `tfsdk:"xdr_exclude"`
+	Migartion_threads types.Int64    `tfsdk:"migartion_threads"`
 }
 
-type AerospikeRolePrivilegeModel struct {
-	Privilege types.String `tfsdk:"privilege"`
-	Namespace types.String `tfsdk:"namespace"`
-	Set       types.String `tfsdk:"set"`
+func (r *AerospikeNamespaceConfig) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_namespace_config"
 }
 
-func (r *AerospikeRole) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_role"
-}
-
-func (r *AerospikeRole) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *AerospikeNamespaceConfig) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		// This description is used by the documentation generator and the language server.
-		Description: "Aerospike Role",
+		Description: "Aerospike Namespace Configuration",
 
 		Attributes: map[string]schema.Attribute{
-			"role_name": schema.StringAttribute{
-				Description: "Role name",
+			"namespace": schema.StringAttribute{
+				Description: "Namespace name",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"privileges": schema.SetNestedAttribute{
-				Description: `Privilege set, comprised from {privilege="name",namespace="name",set="name"] maps. Namespace and Set are optional`,
-				Required:    true,
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"privilege": schema.StringAttribute{
-							Description: "Privilege name",
-							Required:    true,
-							Validators: []validator.String{
-								stringvalidator.OneOf("user-admin", "sys-admin", "data-admin", "udf-admin",
-									"sindex-admin", "read-write-udf", "read-write", "read", "write", "truncate"),
-							},
-						},
-						"namespace": schema.StringAttribute{
-							Description: "Namespace. Optional - if nulll the privilege will apply to all namespaces. must not be an empty string",
-							Optional:    true,
-							Validators: []validator.String{
-								stringvalidator.LengthAtLeast(1),
-							},
-						},
-						"set": schema.StringAttribute{
-							Description: "Set. Optional - if null the privilege will apply to all sets. Must be used with namespace. Must not be an emptry string",
-							Optional:    true,
-							Validators: []validator.String{
-								// Validate this attribute must be configured with other_attr.
-								stringvalidator.AlsoRequires(path.Expressions{
-									path.MatchRelative().AtParent().AtName("namespace"),
-								}...),
-								stringvalidator.LengthAtLeast(1),
-							},
-						},
-					},
-				},
-			},
-			"white_list": schema.ListAttribute{
-				Description: "A list of IP addresses allowed to connect.",
+			"default_set_ttl": schema.MapAttribute{
+				Description: "Default TTL for sets in the namespace",
 				Optional:    true,
 				ElementType: types.StringType,
 			},
-			"read_quota": schema.Int64Attribute{
-				Description: "Read quota to apply to the role",
+			"xdr_include": schema.ListAttribute{
+				Description: "A list of sets to include in XDR",
 				Optional:    true,
-				Computed:    true,
-				Default:     int64default.StaticInt64(0),
+				ElementType: types.StringType,
+				Validators: []validator.List{
+					listvalidator.ConflictsWith(path.MatchRoot("xdr_exclude")),
+				},
 			},
-			"write_quota": schema.Int64Attribute{
-				Description: "write quota to apply to the role",
+			"xdr_exclude": schema.ListAttribute{
+				Description: "A list of sets to exclude from XDR",
 				Optional:    true,
-				Computed:    true,
-				Default:     int64default.StaticInt64(0),
+				ElementType: types.StringType,
+				Validators: []validator.List{
+					listvalidator.ConflictsWith(path.MatchRoot("xdr_include")),
+				},
+			},
+			"migartion_threads": schema.Int64Attribute{
+				Description: "The number of migration threads to use for the namespace",
+				Optional:    true,
 			},
 		},
 	}
 }
 
-func (r *AerospikeRole) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+func (r *AerospikeNamespaceConfig) Configure(ctx context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	// Prevent panic if the provider has not been configured.
 	if req.ProviderData == nil {
 		return
@@ -146,9 +116,9 @@ func (r *AerospikeRole) Configure(ctx context.Context, req resource.ConfigureReq
 	r.asConn = asConn
 }
 
-func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var data AerospikeRoleModel
-	adminPol := as.NewAdminPolicy()
+func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var data AerospikeNamespaceConfigModel
+	infoPol := as.NewInfoPolicy()
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
@@ -157,9 +127,28 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	roleName := data.Role_name.ValueString()
-	readQuota := uint32(data.Read_quota.ValueInt64())
-	writeQuota := uint32(data.Write_quota.ValueInt64())
+	namespace := data.Namespace.ValueString()
+
+	if !data.Default_set_ttl.IsNull() {
+
+		// copy the map to a go map
+		ttlMap := make(map[string]types.String, len(data.Default_set_ttl.Elements()))
+
+		randomNode, err := (*r.asConn.client).Cluster().GetRandomNode()
+		if err != nil {
+			panic(err)
+		}
+
+		// iterate over the map and set the default ttl in Aerospike
+		for set, ttl := range ttlMap {
+			command := "set-config:context=namespace;id=" + namespace + ";set=" + set + ";default-ttl=" + ttl.ValueString()
+			_, err := randomNode.RequestInfo(infoPol, command)
+			if err != nil {
+				panic(err)
+			}
+		}
+
+	}
 
 	privElements := make([]types.Object, 0, len(data.Privileges.Elements()))
 	data.Privileges.ElementsAs(ctx, &privElements, false)
@@ -169,7 +158,7 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 		var privModel AerospikeRolePrivilegeModel
 		p.As(ctx, &privModel, basetypes.ObjectAsOptions{})
 
-		if !privModel.Namespace.IsNull() && !namespaceExists(*r.asConn.client, privModel.Namespace.ValueString()) {
+		if !privModel.Namespace.IsNull() && !r.namespaceExists(privModel.Namespace.ValueString()) {
 			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Invalid namesace", "Namespace \""+privModel.Namespace.ValueString()+"\" does not exist in the cluster. Can't create role referencing it"))
 			return
 		}
@@ -210,7 +199,7 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 
 }
 
-func (r *AerospikeRole) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var data AerospikeRoleModel
 
 	// Read Terraform prior state data into the model
@@ -280,7 +269,7 @@ func (r *AerospikeRole) Read(ctx context.Context, req resource.ReadRequest, resp
 
 }
 
-func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+func (r *AerospikeNamespaceConfig) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan, state, data AerospikeRoleModel
 
 	// Read Terraform plan data into the model
@@ -391,7 +380,7 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
-func (r *AerospikeRole) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+func (r *AerospikeNamespaceConfig) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var data AerospikeRoleModel
 
 	// Read Terraform prior state data into the model
@@ -413,84 +402,6 @@ func (r *AerospikeRole) Delete(ctx context.Context, req resource.DeleteRequest, 
 
 }
 
-func (r *AerospikeRole) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *AerospikeNamespaceConfig) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("role_name"), req, resp)
-}
-
-func privToStr(privilege as.Privilege) string {
-	return "(" + string(privilege.Code) + "," + privilege.Namespace + "," + privilege.SetName + ")"
-}
-
-func asPrivFromStringValues(priv, namespace, set types.String) as.Privilege {
-	// ugly hack since privilegeCode isn't exported and I couldn't find anything else that worked :(
-	var tmpPriv as.Privilege
-	n := namespace.ValueString()
-	s := set.ValueString()
-	switch priv.ValueString() {
-	case "user-admin":
-		tmpPriv = as.Privilege{Code: as.UserAdmin, Namespace: n, SetName: s}
-	case "sys-admin":
-		tmpPriv = as.Privilege{Code: as.SysAdmin, Namespace: n, SetName: s}
-	case "data-admin":
-		tmpPriv = as.Privilege{Code: as.DataAdmin, Namespace: n, SetName: s}
-	case "udf-admin":
-		tmpPriv = as.Privilege{Code: as.UDFAdmin, Namespace: n, SetName: s}
-	case "sindex-admin":
-		tmpPriv = as.Privilege{Code: as.SIndexAdmin, Namespace: n, SetName: s}
-	case "read-write-udf":
-		tmpPriv = as.Privilege{Code: as.ReadWriteUDF, Namespace: n, SetName: s}
-	case "read":
-		tmpPriv = as.Privilege{Code: as.Read, Namespace: n, SetName: s}
-	case "write":
-		tmpPriv = as.Privilege{Code: as.Write, Namespace: n, SetName: s}
-	case "read-write":
-		tmpPriv = as.Privilege{Code: as.ReadWrite, Namespace: n, SetName: s}
-	case "truncate":
-		tmpPriv = as.Privilege{Code: as.Truncate, Namespace: n, SetName: s}
-	}
-	return tmpPriv
-}
-
-func asPrivToStringValues(priv as.Privilege) (types.String, types.String, types.String) {
-	var code string
-	var namespace, set types.String
-	switch priv.Code {
-	case as.UserAdmin:
-		code = "user-admin"
-	case as.SysAdmin:
-		code = "sys-admin"
-	case as.DataAdmin:
-		code = "data-admin"
-	case as.UDFAdmin:
-		code = "udf-admin"
-	case as.SIndexAdmin:
-		code = "sindex-admin"
-	case as.ReadWriteUDF:
-		code = "read-write-udf"
-	case as.Read:
-		code = "read"
-	case as.Write:
-		code = "write"
-	case as.ReadWrite:
-		code = "read-write"
-	case as.Truncate:
-		code = "truncate"
-	}
-
-	if priv.Namespace == "" {
-		namespace = types.StringNull()
-	} else {
-		namespace = types.StringValue(priv.Namespace)
-	}
-	if priv.SetName == "" {
-		set = types.StringNull()
-	} else {
-		set = types.StringValue(priv.SetName)
-	}
-
-	return types.StringValue(code), namespace, set
-}
-
-func privObjectType() types.ObjectType {
-	return types.ObjectType{AttrTypes: map[string]attr.Type{"privilege": types.StringType, "namespace": types.StringType, "set": types.StringType}}
 }
