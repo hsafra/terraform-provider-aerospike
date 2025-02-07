@@ -4,8 +4,6 @@
 package provider
 
 import (
-	as "github.com/aerospike/aerospike-client-go/v7"
-	astypes "github.com/aerospike/aerospike-client-go/v7/types"
 	"os"
 	"strconv"
 )
