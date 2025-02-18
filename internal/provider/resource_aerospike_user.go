@@ -52,7 +52,7 @@ func (r *AerospikeUser) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 		Attributes: map[string]schema.Attribute{
 			"user_name": schema.StringAttribute{
-				Description: "User name",
+				Description: "User name. This attribute is the unique identifier for the user and is used for importing",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),

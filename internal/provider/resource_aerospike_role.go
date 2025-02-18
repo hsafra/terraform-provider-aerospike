@@ -65,7 +65,7 @@ func (r *AerospikeRole) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 		Attributes: map[string]schema.Attribute{
 			"role_name": schema.StringAttribute{
-				Description: "Role name",
+				Description: "Role name. This attribute is the unique identifier for the role and is used for importing",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
