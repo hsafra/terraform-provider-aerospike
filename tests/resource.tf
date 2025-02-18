@@ -4,20 +4,20 @@
 #  roles     = ["role21", "role22"]
 #}
 #
-#resource "aerospike_user" "test3" {
-#  user_name = "test3"
-#  password  = "test3"
-#  roles     = ["role31", "role32"]
-#}
-#
+resource "aerospike_user" "test3" {
+ user_name = "test3"
+ password  = "test3"
+ roles     = ["role1"]
+}
+
 
 resource "aerospike_role" "role1" {
   role_name = "role1"
   privileges = [
     {
       privilege = "read"
-      namespace ="d"
-      set = ""
+      namespace = "aerospike"
+      set       = "set"
     }
   ]
 }
