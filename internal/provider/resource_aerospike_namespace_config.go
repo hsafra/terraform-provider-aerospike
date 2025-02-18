@@ -41,7 +41,7 @@ type AerospikeNamespaceConfigModel struct {
 	XDR_include       []types.String `tfsdk:"xdr_include"`
 	XDR_exclude       []types.String `tfsdk:"xdr_exclude"`
 	Migartion_threads types.Int64    `tfsdk:"migartion_threads"`
-	Info_commands     []types.String `tfsdk:"info_commands"`
+	Info_commands     types.List     `tfsdk:"info_commands"`
 }
 
 func (r *AerospikeNamespaceConfig) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -67,7 +67,7 @@ func (r *AerospikeNamespaceConfig) Schema(ctx context.Context, req resource.Sche
 				ElementType: types.StringType,
 			},
 			"xdr_datacenter": schema.StringAttribute{
-				Description: "The XDR datacenter to use for the namespace",
+				Description: "The XDR datacenter to use for the namespace. Must be specified with xdr_include or xdr_exclude",
 				Optional:    true,
 				Validators: []validator.String{
 					stringvalidator.Any(
@@ -77,7 +77,7 @@ func (r *AerospikeNamespaceConfig) Schema(ctx context.Context, req resource.Sche
 				},
 			},
 			"xdr_include": schema.ListAttribute{
-				Description: "A list of sets to include in XDR",
+				Description: "A list of sets to include in XDR. Don't use along with xdr_exclude, must be specified with xdr_datacenter",
 				Optional:    true,
 				ElementType: types.StringType,
 				Validators: []validator.List{
@@ -85,7 +85,7 @@ func (r *AerospikeNamespaceConfig) Schema(ctx context.Context, req resource.Sche
 				},
 			},
 			"xdr_exclude": schema.ListAttribute{
-				Description: "A list of sets to exclude from XDR",
+				Description: "A list of sets to exclude from XDR. Don't use along with xdr_include, must be specified with xdr_datacenter",
 				Optional:    true,
 				ElementType: types.StringType,
 				Validators: []validator.List{
@@ -127,6 +127,7 @@ func (r *AerospikeNamespaceConfig) Configure(ctx context.Context, req resource.C
 
 func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var data AerospikeNamespaceConfigModel
+	var diags diag.Diagnostics
 
 	// Read Terraform plan data into the model
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
@@ -153,17 +154,26 @@ func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.Crea
 			if err != nil {
 				panic(err)
 			}
-			data.Info_commands = append(data.Info_commands, types.StringValue(command))
+
+			data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
+			if diags.HasError() {
+				resp.Diagnostics = diags
+				return
+			}
 		}
 	}
 
-	if !(len(data.XDR_exclude) > 0) {
+	if len(data.XDR_exclude) > 0 {
 		command := "set-config:context=xdr;dc=" + data.XDR_datacenter.ValueString() + ";namespace=" + namespace + ";ship-only-specified-sets=false"
 		_, err := sendInfoCommand(*r.asConn.client, command)
 		if err != nil {
 			panic(err)
 		}
-		data.Info_commands = append(data.Info_commands, types.StringValue(command))
+		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
+		if diags.HasError() {
+			resp.Diagnostics = diags
+			return
+		}
 
 		//Admin+> asinfo -v "set-config:context=xdr;dc=dc2;namespace=example;ignore-set=set1"
 
@@ -178,16 +188,24 @@ func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.Crea
 		if err != nil {
 			panic(err)
 		}
-		data.Info_commands = append(data.Info_commands, types.StringValue(command))
+		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
+		if diags.HasError() {
+			resp.Diagnostics = diags
+			return
+		}
 	}
 
-	if !(len(data.XDR_include) > 0) {
+	if len(data.XDR_include) > 0 {
 		command := "set-config:context=xdr;dc=" + data.XDR_datacenter.ValueString() + ";namespace=" + namespace + ";ship-only-specified-sets=true"
 		_, err := sendInfoCommand(*r.asConn.client, command)
 		if err != nil {
 			panic(err)
 		}
-		data.Info_commands = append(data.Info_commands, types.StringValue(command))
+		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
+		if diags.HasError() {
+			resp.Diagnostics = diags
+			return
+		}
 
 		//Admin+> asinfo -v "set-config:context=xdr;dc=dc2;namespace=example;ship-set=set1"
 
@@ -202,18 +220,26 @@ func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.Crea
 		if err != nil {
 			panic(err)
 		}
-		data.Info_commands = append(data.Info_commands, types.StringValue(command))
+		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
+		if diags.HasError() {
+			resp.Diagnostics = diags
+			return
+		}
 	}
 
 	if !data.Migartion_threads.IsNull() {
 		//asinfo -v "set-config:context=service;migrate-threads=0"
 
-		command := "set-config:context=servoce;migrate-threads=" + strconv.Itoa(int(data.Migartion_threads.ValueInt64()))
+		command := "set-config:context=service;migrate-threads=" + strconv.Itoa(int(data.Migartion_threads.ValueInt64()))
 		_, err := sendInfoCommand(*r.asConn.client, command)
 		if err != nil {
 			panic(err)
 		}
-		data.Info_commands = append(data.Info_commands, types.StringValue(command))
+		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
+		if diags.HasError() {
+			resp.Diagnostics = diags
+			return
+		}
 	}
 
 	// Write logs using the tflog package

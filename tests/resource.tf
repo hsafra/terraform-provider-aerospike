@@ -11,16 +11,16 @@
 #}
 #
 
-resource "aerospike_role" "role1" {
-  role_name = "role1"
-  privileges = [
-    {
-      privilege = "read"
-      namespace ="aerospike"
-      set = "test"
-    }
-  ]
-}
+# resource "aerospike_role" "role1" {
+#   role_name = "role1"
+#   privileges = [
+#     {
+#       privilege = "read"
+#       namespace = "aerospike"
+#       set       = "test"
+#     }
+#   ]
+# }
 
 #resource "aerospike_role" "role2" {
 #  role_name = "role2"
@@ -49,3 +49,18 @@ resource "aerospike_role" "role1" {
 #  privileges = [{ privilege = "read-write" }]
 #  white_list = ["1.1.1.5", "3.3.3.3"]
 #}
+
+resource "aerospike_namespace_config" "aerospike_ns" {
+  namespace = "aerospike"
+  default_set_ttl = {
+    "set1" = "100"
+    "set2" = "10M"
+  }
+  migartion_threads = 2
+  xdr_datacenter    = "DC1"
+  xdr_exclude       = ["set3"]
+}
+
+output "info_commands" {
+  value = aerospike_namespace_config.aerospike_ns.info_commands
+}
