@@ -26,7 +26,7 @@ resource "aerospike_user" "test2" {
 ### Required
 
 - `password` (String, Sensitive) Password
-- `user_name` (String) User name
+- `user_name` (String) User name. This attribute is the unique identifier for the user and is used for importing
 
 ### Optional
 
