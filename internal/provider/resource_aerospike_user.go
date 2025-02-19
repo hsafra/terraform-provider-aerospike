@@ -52,7 +52,7 @@ func (r *AerospikeUser) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 		Attributes: map[string]schema.Attribute{
 			"user_name": schema.StringAttribute{
-				Description: "User name",
+				Description: "User name. This attribute is the unique identifier for the user and is used for importing",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -139,14 +139,9 @@ func (r *AerospikeUser) Read(ctx context.Context, req resource.ReadRequest, resp
 	}
 
 	if err != nil && err.Matches(astypes.INVALID_USER) {
-		data.User_name = types.StringNull()
-		data.Password = types.StringNull()
-		data.Roles = nil
-
+		// User does not exist, remove from state
+		resp.State.RemoveResource(ctx)
 		tflog.Trace(ctx, "read user "+data.User_name.ValueString()+" and it does not exist")
-
-		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
-
 		return
 	}
 

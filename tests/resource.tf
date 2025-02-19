@@ -5,11 +5,10 @@
 #}
 #
 #resource "aerospike_user" "test3" {
-#  user_name = "test3"
-#  password  = "test3"
-#  roles     = ["role31", "role32"]
+# user_name = "test3"
+# password  = "test3"
+# roles     = ["role1"]
 #}
-#
 
 # resource "aerospike_role" "role1" {
 #   role_name = "role1"

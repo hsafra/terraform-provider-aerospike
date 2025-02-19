@@ -65,7 +65,7 @@ func (r *AerospikeRole) Schema(ctx context.Context, req resource.SchemaRequest, 
 
 		Attributes: map[string]schema.Attribute{
 			"role_name": schema.StringAttribute{
-				Description: "Role name",
+				Description: "Role name. This attribute is the unique identifier for the role and is used for importing",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -228,16 +228,9 @@ func (r *AerospikeRole) Read(ctx context.Context, req resource.ReadRequest, resp
 	}
 
 	if err != nil && err.Matches(astypes.INVALID_ROLE) {
-		data.Role_name = types.StringNull()
-		data.Privileges = types.SetNull(privObjectType())
-		data.White_list = nil
-		data.Read_quota = types.Int64Null()
-		data.Write_quota = types.Int64Null()
-
+		// Role does not exist
+		resp.State.RemoveResource(ctx)
 		tflog.Trace(ctx, "read role "+data.Role_name.ValueString()+" and it does not exist")
-
-		resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
-
 		return
 	}
 

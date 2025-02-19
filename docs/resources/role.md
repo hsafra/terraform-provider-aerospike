@@ -32,7 +32,7 @@ resource "aerospike_role" "role2" {
 ### Required
 
 - `privileges` (Attributes Set) Privilege set, comprised from {privilege="name",namespace="name",set="name"] maps. Namespace and Set are optional (see [below for nested schema](#nestedatt--privileges))
-- `role_name` (String) Role name
+- `role_name` (String) Role name. This attribute is the unique identifier for the role and is used for importing
 
 ### Optional
 
