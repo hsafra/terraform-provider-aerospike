@@ -34,18 +34,21 @@ func sendInfoCommand(conn as.ClientIfc, command string) (map[string]string, erro
 }
 
 // check is the capability is supported in the aerospike version we're connected to
-func supportsCapability(conn as.ClientIfc, capability asCapabilities) bool {
+func supportsCapability(conn as.ClientIfc, capability asCapabilities) (bool, error) {
 
 	serverBuild, err := sendInfoCommand(conn, "build")
 	if err != nil {
-		panic(err)
+		return false, err
 	}
 	serverMajorVersion, err := strconv.Atoi(serverBuild["build"][0:1])
+	if err != nil {
+		panic(err)
+	}
 
 	switch capability {
 	case SetLevelTTL:
-		return serverMajorVersion >= int(SetLevelTTL)
+		return serverMajorVersion >= int(SetLevelTTL), nil
 	}
 
-	return false
+	return false, nil
 }

@@ -139,7 +139,12 @@ func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.Crea
 	namespace := data.Namespace.ValueString()
 
 	if !data.Default_set_ttl.IsNull() {
-		if !supportsCapability(*r.asConn.client, SetLevelTTL) {
+		supported, err := supportsCapability(*r.asConn.client, SetLevelTTL)
+		if err != nil {
+			panic(err)
+		}
+
+		if !supported {
 			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Invalid server vesrion", "Aerospike server version does not support set level ttl. Versions "+strconv.Itoa(int(SetLevelTTL))+" are required"))
 			return
 		}

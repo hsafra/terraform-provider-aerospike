@@ -23,7 +23,7 @@ Aerospike Namespace Configuration
 
 - `default_set_ttl` (Map of String) Default TTL for sets in the namespace
 - `migartion_threads` (Number) The number of migration threads to use for the namespace
-- `xdr_datacenter` (String) The XDR datacenter to use for the namespace. Must be specified with xde_include or xdr_exclude
+- `xdr_datacenter` (String) The XDR datacenter to use for the namespace. Must be specified with xdr_include or xdr_exclude
 - `xdr_exclude` (List of String) A list of sets to exclude from XDR. Don't use along with xdr_include, must be specified with xdr_datacenter
 - `xdr_include` (List of String) A list of sets to include in XDR. Don't use along with xdr_exclude, must be specified with xdr_datacenter
 
