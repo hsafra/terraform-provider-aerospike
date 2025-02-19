@@ -169,7 +169,7 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 		var privModel AerospikeRolePrivilegeModel
 		p.As(ctx, &privModel, basetypes.ObjectAsOptions{})
 
-		if !privModel.Namespace.IsNull() && !r.namespaceExists(privModel.Namespace.ValueString()) {
+		if !privModel.Namespace.IsNull() && !namespaceExists(*r.asConn.client, privModel.Namespace.ValueString()) {
 			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Invalid namesace", "Namespace \""+privModel.Namespace.ValueString()+"\" does not exist in the cluster. Can't create role referencing it"))
 			return
 		}
@@ -303,7 +303,7 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 			var privModel AerospikeRolePrivilegeModel
 			p.As(ctx, &privModel, basetypes.ObjectAsOptions{})
 
-			if !privModel.Namespace.IsNull() && !r.namespaceExists(privModel.Namespace.ValueString()) {
+			if !privModel.Namespace.IsNull() && !namespaceExists(*r.asConn.client, privModel.Namespace.ValueString()) {
 				resp.Diagnostics.Append(diag.NewErrorDiagnostic("Invalid namesace", "Namespace \""+privModel.Namespace.ValueString()+"\" does not exist in the cluster. Can't create role referencing it"))
 				return
 			}
@@ -412,15 +412,6 @@ func (r *AerospikeRole) ImportState(ctx context.Context, req resource.ImportStat
 
 func privToStr(privilege as.Privilege) string {
 	return "(" + string(privilege.Code) + "," + privilege.Namespace + "," + privilege.SetName + ")"
-}
-
-func (r *AerospikeRole) namespaceExists(namespace string) bool {
-	key, _ := as.NewKey(namespace, "dummy", "dummy")
-
-	_, err := (*r.asConn.client).Get(nil, key)
-
-	return !err.Matches(astypes.INVALID_NAMESPACE)
-
 }
 
 func asPrivFromStringValues(priv, namespace, set types.String) as.Privilege {
