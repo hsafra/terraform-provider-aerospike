@@ -33,10 +33,10 @@ jobs:
           cache: true
       - run: go mod download
       - run: go build -v .
-      - uses: hashicorp/setup-terraform@633666f66e0061ca3b725c73b2ec20cd13a8fdd1 # v2.0.3
+      - name: Run linters
+        uses: golangci/golangci-lint-action@ec5d18412c0aeab7936cb16880d708ba2a64e1ae # v6.2.0
         with:
-          terraform_version: ${{ matrix.terraform }}
-          terraform_wrapper: false
+          version: latest
 
   generate:
     runs-on: ubuntu-latest
