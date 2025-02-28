@@ -57,7 +57,8 @@ resource "aerospike_namespace_config" "aerospike_ns" {
   }
   migartion_threads = 2
   xdr_datacenter    = "DC1"
-  xdr_exclude       = ["set3"]
+  #xdr_exclude       = ["set3"]
+  xdr_include       = ["set1"]
 }
 
 output "info_commands" {

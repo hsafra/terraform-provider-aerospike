@@ -190,7 +190,9 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 				"Timeout connecting to Aerospike cluster "+host+" "+err.Error()))
 			return
 		} else {
-			panic(err)
+			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Error connecting to Aerospike",
+				"Error connecting to Aerospike cluster "+host+" Please check connections parameters. Driver error was:\n"+err.Error()))
+			return
 		}
 	}
 

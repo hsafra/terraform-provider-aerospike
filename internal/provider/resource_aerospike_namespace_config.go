@@ -172,15 +172,13 @@ func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.Crea
 		command := "set-config:context=xdr;dc=" + data.XDR_datacenter.ValueString() + ";namespace=" + namespace + ";ship-only-specified-sets=false"
 		_, err := sendInfoCommand(*r.asConn.client, command)
 		if err != nil {
-			panic(err)
-		}
-		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
-		if diags.HasError() {
-			resp.Diagnostics = diags
+			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Error in request", "Error in request: "+err.Error()))
 			return
 		}
+		tflog.Trace(ctx, "Applied namespace config to "+namespace+" with command "+command)
+		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
 
-		//Admin+> asinfo -v "set-config:context=xdr;dc=dc2;namespace=example;ignore-set=set1"
+		//Admin+> asinfo -v "set-config:context=xdr;dc=dc2;namespace=example;ignore-sets=set1"
 
 		sets := make([]string, 0, len(data.XDR_exclude))
 		for _, set := range data.XDR_exclude {
@@ -191,26 +189,22 @@ func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.Crea
 
 		_, err = sendInfoCommand(*r.asConn.client, command)
 		if err != nil {
-			panic(err)
-		}
-		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
-		if diags.HasError() {
-			resp.Diagnostics = diags
+			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Error in request", "Error in request: "+err.Error()))
 			return
 		}
+		tflog.Trace(ctx, "Applied namespace config to "+namespace+" with command "+command)
+		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
 	}
 
 	if len(data.XDR_include) > 0 {
 		command := "set-config:context=xdr;dc=" + data.XDR_datacenter.ValueString() + ";namespace=" + namespace + ";ship-only-specified-sets=true"
 		_, err := sendInfoCommand(*r.asConn.client, command)
 		if err != nil {
-			panic(err)
-		}
-		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
-		if diags.HasError() {
-			resp.Diagnostics = diags
+			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Error in request", "Error in request: "+err.Error()))
 			return
 		}
+		tflog.Trace(ctx, "Applied namespace config to "+namespace+" with command "+command)
+		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
 
 		//Admin+> asinfo -v "set-config:context=xdr;dc=dc2;namespace=example;ship-set=set1"
 
@@ -223,13 +217,11 @@ func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.Crea
 
 		_, err = sendInfoCommand(*r.asConn.client, command)
 		if err != nil {
-			panic(err)
-		}
-		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
-		if diags.HasError() {
-			resp.Diagnostics = diags
+			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Error in request", "Error in request: "+err.Error()))
 			return
 		}
+		tflog.Trace(ctx, "Applied namespace config to "+namespace+" with command "+command)
+		data.Info_commands, diags = appendStringToListString(command, data.Info_commands)
 	}
 
 	if !data.Migartion_threads.IsNull() {
