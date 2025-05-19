@@ -6,7 +6,7 @@ require (
 	github.com/aerospike/aerospike-client-go/v7 v7.10.1
 	github.com/ghetzel/go-stockutil v1.13.0
 	github.com/hashicorp/terraform-plugin-docs v0.21.0
-	github.com/hashicorp/terraform-plugin-framework v1.14.1
+	github.com/hashicorp/terraform-plugin-framework v1.15.0
 	github.com/hashicorp/terraform-plugin-framework-validators v0.18.0
 	github.com/hashicorp/terraform-plugin-go v0.27.0
 	github.com/hashicorp/terraform-plugin-log v0.9.0
