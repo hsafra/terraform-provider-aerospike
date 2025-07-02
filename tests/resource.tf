@@ -49,18 +49,19 @@
 #  white_list = ["1.1.1.5", "3.3.3.3"]
 #}
 
-resource "aerospike_namespace_config" "aerospike_ns" {
+resource "aerospike_config_namespace" "aerospike_ns" {
   namespace = "aerospike"
   default_set_ttl = {
     "set1" = "100"
     "set2" = "10M"
   }
-  migartion_threads = 2
-  xdr_datacenter    = "DC1"
-  #xdr_exclude       = ["set3"]
-  xdr_include       = ["set1"]
+  xdr_config = {
+    datacenter               = "dc1"
+    ship_only_specified_sets = false
+    exclude_sets = ["set3"]
+  }
 }
 
 output "info_commands" {
-  value = aerospike_namespace_config.aerospike_ns.info_commands
+  value = aerospike_config_namespace.aerospike_ns.info_commands
 }

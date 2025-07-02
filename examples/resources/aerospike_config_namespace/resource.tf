@@ -4,9 +4,11 @@ resource "aerospike_namespace_config" "aerospike_ns" {
     "set1" = "100"
     "set2" = "10M"
   }
-  migartion_threads = 2
-  xdr_datacenter    = "dc1"
-  xdr_exclude       = ["set3"]
+  xdr_config = {
+    datacenter               = "dc1"
+    ship_only_specified_sets = false
+    exclude_sets             = ["set3"]
+  }
 }
 
 
