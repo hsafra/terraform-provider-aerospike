@@ -38,6 +38,7 @@ type AerospikeConfigNamespaceModel struct {
 	Default_set_ttl types.Map    `tfsdk:"default_set_ttl"`
 	Info_commands   types.List   `tfsdk:"info_commands"`
 	XDR_config      types.Object `tfsdk:"xdr_config"`
+	Defrag_LWM      types.Int64  `tfsdk:"defrag_lwm"`
 }
 
 type AerospikeConfigNamespaceXDRModel struct {
@@ -104,6 +105,10 @@ func (r *AerospikeConfigNamespace) Schema(ctx context.Context, req resource.Sche
 					},
 				},
 			},
+			"defrag_lwm": schema.Int64Attribute{
+				Description: "Defragmentation low water mark. This is the percentage of free space in the namespace that triggers defragmentation.",
+				Optional:    true,
+			},
 		},
 	}
 }
@@ -148,7 +153,7 @@ func (r *AerospikeConfigNamespace) Create(ctx context.Context, req resource.Crea
 		}
 
 		if !supported {
-			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Invalid server vesrion", "Aerospike server version does not support set level ttl. Versions "+strconv.Itoa(int(SetLevelTTL))+" are required"))
+			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Invalid server version", "Aerospike server version does not support set level ttl. Versions "+strconv.Itoa(int(SetLevelTTL))+" and up are required"))
 			return
 		}
 

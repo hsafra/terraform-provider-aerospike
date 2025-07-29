@@ -4,6 +4,8 @@
 package provider
 
 import (
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"os"
 	"strconv"
 )
@@ -27,4 +29,10 @@ func withEnvironmentOverrideInt64(currentValue int64, envOverrideKey string) int
 	}
 
 	return currentValue
+}
+
+func appendStringToListString(str string, list types.List) (types.List, diag.Diagnostics) {
+	tempCmds := append(list.Elements(), types.StringValue(str))
+	tmpList, diags := types.ListValue(types.StringType, tempCmds)
+	return tmpList, diags
 }
