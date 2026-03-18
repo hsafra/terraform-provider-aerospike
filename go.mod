@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/aerospike/aerospike-client-go/v7 v7.10.2
-	github.com/ghetzel/go-stockutil v1.13.2
+	github.com/ghetzel/go-stockutil v1.14.0
 	github.com/hashicorp/terraform-plugin-docs v0.24.0
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
 	github.com/hashicorp/terraform-plugin-framework-validators v0.19.0
@@ -17,7 +17,7 @@ require (
 	github.com/BurntSushi/toml v1.2.1 // indirect
 	github.com/Kunde21/markdownfmt/v3 v3.1.0 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
-	github.com/Masterminds/semver/v3 v3.2.0 // indirect
+	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/Masterminds/sprig/v3 v3.2.3 // indirect
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
 	github.com/agext/levenshtein v1.2.2 // indirect
@@ -78,14 +78,14 @@ require (
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	github.com/zclconf/go-cty v1.17.0 // indirect
 	go.abhg.dev/goldmark/frontmatter v0.2.0 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
+	golang.org/x/crypto v0.49.0 // indirect
 	golang.org/x/exp v0.0.0-20230809150735-7b3493d9a819 // indirect
-	golang.org/x/mod v0.33.0 // indirect
-	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
-	golang.org/x/tools v0.41.0 // indirect
+	golang.org/x/mod v0.34.0 // indirect
+	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/tools v0.43.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	google.golang.org/grpc v1.79.2 // indirect
@@ -93,5 +93,5 @@ require (
 	gopkg.in/neurosnap/sentences.v1 v1.0.7 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/client-go v0.33.1 // indirect
+	k8s.io/client-go v0.35.2 // indirect
 )
