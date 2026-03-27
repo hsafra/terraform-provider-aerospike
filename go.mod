@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/aerospike/aerospike-client-go/v7 v7.10.2
-	github.com/ghetzel/go-stockutil v1.14.0
+	github.com/ghetzel/go-stockutil v1.14.3
 	github.com/hashicorp/terraform-plugin-docs v0.24.0
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
 	github.com/hashicorp/terraform-plugin-framework-validators v0.19.0
