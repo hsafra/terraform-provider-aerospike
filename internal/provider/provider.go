@@ -207,6 +207,7 @@ func (p *AerospikeProvider) Resources(ctx context.Context) []func() resource.Res
 		NewAerospikeRole,
 		NewAerospikeNamespaceConfig,
 		NewAerospikeServiceConfig,
+		NewAerospikeXDRDCConfig,
 	}
 }
 
