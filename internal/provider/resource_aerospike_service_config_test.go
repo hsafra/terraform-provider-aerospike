@@ -175,6 +175,159 @@ func TestAccAerospikeServiceConfig_singleton(t *testing.T) {
 	})
 }
 
+func TestAccAerospikeServiceConfig_multipleParams(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccServiceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeServiceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccServiceConfigMultipleParams(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-max", "25000"),
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-idle-ms", "60001"),
+					testAccCheckServiceParam("proto-fd-max", "25000"),
+					testAccCheckServiceParam("proto-fd-idle-ms", "60001"),
+				),
+			},
+		},
+	})
+}
+
+// #19: Remove a param (go from 2 to 1).
+func TestAccAerospikeServiceConfig_removeParam(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccServiceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeServiceConfigDestroy,
+		Steps: []resource.TestStep{
+			// Create with two params
+			{
+				Config: testAccServiceConfigMultipleParams(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-max", "25000"),
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-idle-ms", "60001"),
+				),
+			},
+			// Remove one param — should warn but succeed
+			{
+				Config: testAccServiceConfigWithParam("proto-fd-max", "25000"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-max", "25000"),
+					resource.TestCheckNoResourceAttr("aerospike_service_config.test", "params.proto-fd-idle-ms"),
+				),
+			},
+		},
+	})
+}
+
+// #20: Update multiple params in one step.
+func TestAccAerospikeServiceConfig_updateMultipleParams(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccServiceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeServiceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccServiceConfigMultipleParams(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-max", "25000"),
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-idle-ms", "60001"),
+					testAccCheckServiceParam("proto-fd-max", "25000"),
+					testAccCheckServiceParam("proto-fd-idle-ms", "60001"),
+				),
+			},
+			// Update both params at once
+			{
+				Config: testAccServiceConfigMultipleParamsUpdated(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-max", "30000"),
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-idle-ms", "70000"),
+					testAccCheckServiceParam("proto-fd-max", "30000"),
+					testAccCheckServiceParam("proto-fd-idle-ms", "70000"),
+				),
+			},
+		},
+	})
+}
+
+// #21: Server drift detection.
+func TestAccAerospikeServiceConfig_serverDrift(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccServiceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeServiceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccServiceConfigWithParam("proto-fd-max", "25000"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckServiceParam("proto-fd-max", "25000"),
+				),
+			},
+			// Drift: modify param on server directly, then re-apply
+			{
+				PreConfig: func() {
+					client, err := testAccGetAerospikeClient()
+					if err != nil {
+						t.Fatalf("failed to get client: %s", err)
+					}
+					defer client.Close()
+					_, _ = setServiceParam(client, "proto-fd-max", "28000")
+				},
+				Config: testAccServiceConfigWithParam("proto-fd-max", "25000"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-max", "25000"),
+					testAccCheckServiceParam("proto-fd-max", "25000"),
+				),
+			},
+		},
+	})
+}
+
+// #22: Empty params map.
+func TestAccAerospikeServiceConfig_emptyParams(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccServiceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeServiceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccServiceConfigEmptyParams(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "info_commands.#", "0"),
+				),
+			},
+		},
+	})
+}
+
+func testAccServiceConfigMultipleParamsUpdated() string {
+	return `
+resource "aerospike_service_config" "test" {
+  params = {
+    "proto-fd-max"     = "30000"
+    "proto-fd-idle-ms" = "70000"
+  }
+}`
+}
+
+func testAccServiceConfigEmptyParams() string {
+	return `
+resource "aerospike_service_config" "test" {
+  params = {}
+}`
+}
+
+func testAccServiceConfigMultipleParams() string {
+	return `
+resource "aerospike_service_config" "test" {
+  params = {
+    "proto-fd-max"     = "25000"
+    "proto-fd-idle-ms" = "60001"
+  }
+}`
+}
+
 func testAccServiceConfigBasic() string {
 	return `
 resource "aerospike_service_config" "test" {

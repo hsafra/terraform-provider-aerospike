@@ -5,6 +5,7 @@ package provider
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	as "github.com/aerospike/aerospike-client-go/v8"
@@ -173,6 +174,7 @@ func TestAccAerospikeRole_privilegeTypes(t *testing.T) {
 	privilegeTypes := []string{
 		"read", "write", "read-write", "read-write-udf",
 		"sys-admin", "user-admin", "data-admin", "truncate",
+		"udf-admin", "sindex-admin",
 	}
 
 	for _, privType := range privilegeTypes {
@@ -227,6 +229,261 @@ func TestAccAerospikeRole_whitelistManagement(t *testing.T) {
 			},
 		},
 	})
+}
+
+// #6: Changing role_name forces replacement.
+func TestAccAerospikeRole_replaceOnNameChange(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeRoleDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAerospikeRoleConfigNamed("role_replace", "testrole_x", `[{privilege="read"}]`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_role.role_replace", "role_name", "testrole_x"),
+					testAccCheckRoleExists("testrole_x"),
+				),
+			},
+			// Change role_name — should destroy testrole_x and create testrole_y
+			{
+				Config: testAccAerospikeRoleConfigNamed("role_replace", "testrole_y", `[{privilege="read"}]`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_role.role_replace", "role_name", "testrole_y"),
+					testAccCheckRoleExists("testrole_y"),
+					testAccCheckRoleNotExists("testrole_x"),
+				),
+			},
+		},
+	})
+}
+
+// #7: Set without namespace should produce a validation error.
+func TestAccAerospikeRole_setWithoutNamespace(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAerospikeRoleMinimalConfig("testrole_setns", `[{privilege="read", set="testset"}]`),
+				ExpectError: regexp.MustCompile(`(?i)also requires|namespace`),
+			},
+		},
+	})
+}
+
+// #8: Invalid privilege name should produce a validation error.
+func TestAccAerospikeRole_invalidPrivilegeName(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAerospikeRoleMinimalConfig("testrole_badpriv", `[{privilege="superadmin"}]`),
+				ExpectError: regexp.MustCompile(`(?i)invalid|value must be one of`),
+			},
+		},
+	})
+}
+
+// #9: Role referencing a non-existent namespace.
+func TestAccAerospikeRole_invalidNamespace(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAerospikeRoleMinimalConfig("testrole_badns", `[{privilege="read", namespace="nonexistent_ns"}]`),
+				ExpectError: regexp.MustCompile(`Invalid namesace|does not exist`),
+			},
+		},
+	})
+}
+
+// #10: Role that already exists on the server.
+func TestAccAerospikeRole_roleAlreadyExists(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			// Pre-create the role outside Terraform
+			client, err := testAccGetAerospikeClient()
+			if err != nil {
+				t.Fatalf("failed to get client: %s", err)
+			}
+			defer client.Close()
+			adminPol := as.NewAdminPolicy()
+			_ = client.CreateRole(adminPol, "testrole_preexist", []as.Privilege{
+				{Code: as.Read},
+			}, nil, 0, 0)
+		},
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy: func(s *terraform.State) error {
+			// Clean up the pre-created role
+			client, err := testAccGetAerospikeClient()
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+			adminPol := as.NewAdminPolicy()
+			_ = client.DropRole(adminPol, "testrole_preexist")
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAerospikeRoleMinimalConfig("testrole_preexist", `[{privilege="read"}]`),
+				ExpectError: regexp.MustCompile(`Role already exists`),
+			},
+		},
+	})
+}
+
+// #11: Role disappears outside Terraform.
+func TestAccAerospikeRole_disappearsOutsideTerraform(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeRoleDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAerospikeRoleMinimalConfig("testrole_disappear", `[{privilege="read"}]`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_role.testrole_disappear", "role_name", "testrole_disappear"),
+				),
+			},
+			// Drop role outside Terraform, then re-apply — should recreate
+			{
+				PreConfig: func() {
+					client, err := testAccGetAerospikeClient()
+					if err != nil {
+						t.Fatalf("failed to get client: %s", err)
+					}
+					defer client.Close()
+					adminPol := as.NewAdminPolicy()
+					_ = client.DropRole(adminPol, "testrole_disappear")
+				},
+				Config: testAccAerospikeRoleMinimalConfig("testrole_disappear", `[{privilege="read"}]`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_role.testrole_disappear", "role_name", "testrole_disappear"),
+					testAccCheckRoleExists("testrole_disappear"),
+				),
+			},
+		},
+	})
+}
+
+// #12: Update privileges, quotas, and whitelist all at once.
+func TestAccAerospikeRole_updatePrivilegesAndQuotasTogether(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeRoleDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAerospikeRoleFullConfig("testrole_all", `[{privilege="read"}]`, `["1.1.1.1"]`, 100, 200),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_role.testrole_all", "read_quota", "100"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_all", "write_quota", "200"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_all", "white_list.0", "1.1.1.1"),
+				),
+			},
+			// Update everything simultaneously
+			{
+				Config: testAccAerospikeRoleFullConfig("testrole_all", `[{privilege="write", namespace="aerospike"}]`, `["2.2.2.2", "3.3.3.3"]`, 500, 1000),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_role.testrole_all", "read_quota", "500"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_all", "write_quota", "1000"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_all", "white_list.#", "2"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_all", "privileges.#", "1"),
+				),
+			},
+		},
+	})
+}
+
+// #13: Import with quotas, whitelist, and multiple privileges — full round-trip.
+func TestAccAerospikeRole_importVerifyAllFields(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeRoleDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAerospikeRoleFullConfig("testrole_import", `[{privilege="read"}, {privilege="write", namespace="aerospike"}]`, `["10.0.0.1"]`, 100, 200),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_role.testrole_import", "role_name", "testrole_import"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_import", "read_quota", "100"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_import", "write_quota", "200"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_import", "white_list.#", "1"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_import", "privileges.#", "2"),
+				),
+			},
+			{
+				ResourceName:                         "aerospike_role.testrole_import",
+				ImportState:                          true,
+				ImportStateVerify:                    true,
+				ImportStateId:                        "testrole_import",
+				ImportStateVerifyIdentifierAttribute: "role_name",
+			},
+		},
+	})
+}
+
+// testAccCheckRoleExists verifies a role exists on the server.
+func testAccCheckRoleExists(roleName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		client, err := testAccGetAerospikeClient()
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+
+		adminPol := as.NewAdminPolicy()
+		_, queryErr := client.QueryRole(adminPol, roleName)
+		if queryErr != nil {
+			return fmt.Errorf("role %s does not exist: %s", roleName, queryErr)
+		}
+		return nil
+	}
+}
+
+// testAccCheckRoleNotExists verifies a role does NOT exist on the server.
+func testAccCheckRoleNotExists(roleName string) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		client, err := testAccGetAerospikeClient()
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+
+		adminPol := as.NewAdminPolicy()
+		_, queryErr := client.QueryRole(adminPol, roleName)
+		if queryErr == nil {
+			return fmt.Errorf("role %s still exists, expected it to be deleted", roleName)
+		}
+		if !queryErr.Matches(astypes.INVALID_ROLE) {
+			return fmt.Errorf("unexpected error checking role %s: %s", roleName, queryErr)
+		}
+		return nil
+	}
+}
+
+func testAccAerospikeRoleConfigNamed(resourceName, roleName, privileges string) string {
+	return fmt.Sprintf(`
+resource "aerospike_role" "%[1]s" {
+  role_name   = "%[2]s"
+  privileges  = %[3]s
+}`, resourceName, roleName, privileges)
+}
+
+func testAccAerospikeRoleFullConfig(roleName, privileges, whiteList string, readQuota, writeQuota int) string {
+	return fmt.Sprintf(`
+resource "aerospike_role" "%[1]s" {
+  role_name   = "%[1]s"
+  privileges  = %[2]s
+  white_list  = %[3]s
+  read_quota  = %[4]d
+  write_quota = %[5]d
+}`, roleName, privileges, whiteList, readQuota, writeQuota)
 }
 
 // testAccAerospikeRoleMinimalConfig creates a role config without white_list.

@@ -201,27 +201,19 @@ func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRe
 
 			serverSetConfig, err := getSetConfig(r.asConn.client, namespace, setName)
 			if err != nil {
-				// Best-effort: keep state as-is for this set
-				tflog.Trace(ctx, fmt.Sprintf("could not read set config for %s/%s: %s", namespace, setName, err.Error()))
-				stateParams := make(map[string]string)
-				for k, v := range innerMap.Elements() {
-					if sv, ok := v.(types.String); ok {
-						stateParams[k] = sv.ValueString()
-					}
-				}
-				updatedSetConfig[setName] = stateParams
-				continue
+				resp.Diagnostics.AddError("Error reading set config",
+					fmt.Sprintf("Failed to read set config for %s/%s: %s", namespace, setName, err.Error()))
+				return
 			}
 
 			setParams := make(map[string]string)
 			for key, val := range innerMap.Elements() {
-				if sv, ok := val.(types.String); ok {
+				if _, ok := val.(types.String); ok {
 					if serverVal, found := serverSetConfig[key]; found {
 						setParams[key] = serverVal
-					} else {
-						// Keep state value if not readable from server
-						setParams[key] = sv.ValueString()
 					}
+					// If key is not in server response, the set may not exist yet
+					// on the server — omit the key so Terraform detects the drift.
 				}
 			}
 			updatedSetConfig[setName] = setParams

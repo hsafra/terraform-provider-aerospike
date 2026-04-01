@@ -297,30 +297,16 @@ func setXDRDCNamespaceParam(conn *as.Client, dc, namespace, key, value string) (
 	return command, err
 }
 
-// addXDRDCNamespaceShipSet adds a ship-set to a namespace within a DC.
+// addXDRDCNamespaceShipSet adds a single ship-set to a namespace within a DC.
 func addXDRDCNamespaceShipSet(conn *as.Client, dc, namespace, setName string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";namespace=" + namespace + ";ship-set=" + setName
 	_, err := sendInfoCommand(conn, command)
 	return command, err
 }
 
-// removeXDRDCNamespaceShipSet removes a ship-set from a namespace within a DC.
-func removeXDRDCNamespaceShipSet(conn *as.Client, dc, namespace, setName string) (string, error) {
-	command := "set-config:context=xdr;dc=" + dc + ";namespace=" + namespace + ";ship-set=" + setName + ";action=remove"
-	_, err := sendInfoCommand(conn, command)
-	return command, err
-}
-
-// addXDRDCNamespaceIgnoreSet adds an ignore-set to a namespace within a DC.
+// addXDRDCNamespaceIgnoreSet adds a single ignore-set to a namespace within a DC.
 func addXDRDCNamespaceIgnoreSet(conn *as.Client, dc, namespace, setName string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";namespace=" + namespace + ";ignore-set=" + setName
-	_, err := sendInfoCommand(conn, command)
-	return command, err
-}
-
-// removeXDRDCNamespaceIgnoreSet removes an ignore-set from a namespace within a DC.
-func removeXDRDCNamespaceIgnoreSet(conn *as.Client, dc, namespace, setName string) (string, error) {
-	command := "set-config:context=xdr;dc=" + dc + ";namespace=" + namespace + ";ignore-set=" + setName + ";action=remove"
 	_, err := sendInfoCommand(conn, command)
 	return command, err
 }
