@@ -13,7 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// testAccCheckAerospikeUserDestroy verifies the user has been destroyed
+// testAccCheckAerospikeUserDestroy verifies the user has been destroyed.
 func testAccCheckAerospikeUserDestroy(s *terraform.State) error {
 	client, err := testAccGetAerospikeClient()
 	if err != nil {

@@ -13,7 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// testAccCheckAerospikeRoleDestroy verifies the role has been destroyed
+// testAccCheckAerospikeRoleDestroy verifies the role has been destroyed.
 func testAccCheckAerospikeRoleDestroy(s *terraform.State) error {
 	client, err := testAccGetAerospikeClient()
 	if err != nil {
@@ -176,7 +176,6 @@ func TestAccAerospikeRole_privilegeTypes(t *testing.T) {
 	}
 
 	for _, privType := range privilegeTypes {
-		privType := privType // capture range variable
 		t.Run(privType, func(t *testing.T) {
 			roleName := fmt.Sprintf("testrole_%s", sanitizeRoleName(privType))
 			resource.Test(t, resource.TestCase{
@@ -260,7 +259,7 @@ resource "aerospike_role" "%[1]s" {
 }`, roleName, privileges, readQuota, writeQuota)
 }
 
-// sanitizeRoleName replaces hyphens with underscores for valid Terraform resource names
+// sanitizeRoleName replaces hyphens with underscores for valid Terraform resource names.
 func sanitizeRoleName(name string) string {
 	result := make([]byte, len(name))
 	for i := range name {
