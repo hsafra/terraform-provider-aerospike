@@ -133,8 +133,8 @@ func TestAccAerospikeXDRDCConfig_withSetPolicyShipSets(t *testing.T) {
 					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "dc", "test-dc"),
 					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.set_policy.0.ship_only_specified_sets", "true"),
 					testAccCheckXDRDCExists("test-dc"),
-					testAccCheckXDRDCNamespaceParam("test-dc", "aerospike", "ship-only-specified-sets", "true"),
-					testAccCheckXDRDCNamespaceShipSets("test-dc", "aerospike", []string{"users", "orders"}),
+					testAccCheckXDRDCNamespaceParam("ship-only-specified-sets", "true"),
+					testAccCheckXDRDCNamespaceShipSets([]string{"users", "orders"}),
 				),
 			},
 		},
@@ -153,7 +153,7 @@ func TestAccAerospikeXDRDCConfig_withSetPolicyIgnoreSets(t *testing.T) {
 					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "dc", "test-dc"),
 					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.set_policy.0.ship_only_specified_sets", "false"),
 					testAccCheckXDRDCExists("test-dc"),
-					testAccCheckXDRDCNamespaceParam("test-dc", "aerospike", "ship-only-specified-sets", "false"),
+					testAccCheckXDRDCNamespaceParam("ship-only-specified-sets", "false"),
 					testAccCheckXDRDCNamespaceIgnoreSets("test-dc", "aerospike", []string{"temp", "cache"}),
 				),
 			},
@@ -342,7 +342,7 @@ func TestAccAerospikeXDRDCConfig_withNamespaceParams(t *testing.T) {
 					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.name", "aerospike"),
 					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.params.max-throughput", "100000"),
 					testAccCheckXDRDCExists("test-dc"),
-					testAccCheckXDRDCNamespaceParam("test-dc", "aerospike", "max-throughput", "100000"),
+					testAccCheckXDRDCNamespaceParam("max-throughput", "100000"),
 				),
 			},
 			// Update namespace params
@@ -351,7 +351,7 @@ func TestAccAerospikeXDRDCConfig_withNamespaceParams(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.params.max-throughput", "200000"),
 					testAccCheckXDRDCExists("test-dc"),
-					testAccCheckXDRDCNamespaceParam("test-dc", "aerospike", "max-throughput", "200000"),
+					testAccCheckXDRDCNamespaceParam("max-throughput", "200000"),
 				),
 			},
 		},
@@ -370,8 +370,8 @@ func TestAccAerospikeXDRDCConfig_updateSetPolicy(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.set_policy.0.ship_only_specified_sets", "true"),
 					testAccCheckXDRDCExists("test-dc"),
-					testAccCheckXDRDCNamespaceParam("test-dc", "aerospike", "ship-only-specified-sets", "true"),
-					testAccCheckXDRDCNamespaceShipSets("test-dc", "aerospike", []string{"users", "orders"}),
+					testAccCheckXDRDCNamespaceParam("ship-only-specified-sets", "true"),
+					testAccCheckXDRDCNamespaceShipSets([]string{"users", "orders"}),
 				),
 			},
 			// Update: switch to ignore_sets policy
@@ -380,8 +380,8 @@ func TestAccAerospikeXDRDCConfig_updateSetPolicy(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.set_policy.0.ship_only_specified_sets", "false"),
 					testAccCheckXDRDCExists("test-dc"),
-					testAccCheckXDRDCNamespaceParam("test-dc", "aerospike", "ship-only-specified-sets", "false"),
-					testAccCheckXDRDCNamespaceShipSets("test-dc", "aerospike", []string{}),
+					testAccCheckXDRDCNamespaceParam("ship-only-specified-sets", "false"),
+					testAccCheckXDRDCNamespaceShipSets([]string{}),
 				),
 			},
 		},
@@ -400,7 +400,7 @@ func TestAccAerospikeXDRDCConfig_updateShipSets(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.set_policy.0.ship_only_specified_sets", "true"),
 					testAccCheckXDRDCExists("test-dc"),
-					testAccCheckXDRDCNamespaceShipSets("test-dc", "aerospike", []string{"users", "orders"}),
+					testAccCheckXDRDCNamespaceShipSets([]string{"users", "orders"}),
 				),
 			},
 			// Update: change ship_sets to different sets
@@ -409,7 +409,7 @@ func TestAccAerospikeXDRDCConfig_updateShipSets(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.set_policy.0.ship_only_specified_sets", "true"),
 					testAccCheckXDRDCExists("test-dc"),
-					testAccCheckXDRDCNamespaceShipSets("test-dc", "aerospike", []string{"products", "accounts"}),
+					testAccCheckXDRDCNamespaceShipSets([]string{"products", "accounts"}),
 				),
 			},
 		},
@@ -465,7 +465,7 @@ func testAccCheckXDRDCNamespaceIgnoreSets(dc, namespace string, expected []strin
 }
 
 // testAccCheckXDRDCNamespaceShipSets verifies the server has exactly the expected ship-sets.
-func testAccCheckXDRDCNamespaceShipSets(dc, namespace string, expected []string) resource.TestCheckFunc {
+func testAccCheckXDRDCNamespaceShipSets(expected []string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		client, err := testAccGetAerospikeClient()
 		if err != nil {
@@ -473,7 +473,7 @@ func testAccCheckXDRDCNamespaceShipSets(dc, namespace string, expected []string)
 		}
 		defer client.Close()
 
-		config, err := getXDRDCNamespaceConfig(client, dc, namespace)
+		config, err := getXDRDCNamespaceConfig(client, "test-dc", "aerospike")
 		if err != nil {
 			return fmt.Errorf("failed to get XDR DC namespace config: %s", err)
 		}
@@ -509,7 +509,7 @@ func testAccCheckXDRDCParam(dc, key, expected string) resource.TestCheckFunc {
 }
 
 // testAccCheckXDRDCNamespaceParam verifies a namespace-level XDR config parameter on the server.
-func testAccCheckXDRDCNamespaceParam(dc, namespace, key, expected string) resource.TestCheckFunc {
+func testAccCheckXDRDCNamespaceParam(key, expected string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		client, err := testAccGetAerospikeClient()
 		if err != nil {
@@ -517,14 +517,14 @@ func testAccCheckXDRDCNamespaceParam(dc, namespace, key, expected string) resour
 		}
 		defer client.Close()
 
-		config, err := getXDRDCNamespaceConfig(client, dc, namespace)
+		config, err := getXDRDCNamespaceConfig(client, "test-dc", "aerospike")
 		if err != nil {
 			return fmt.Errorf("failed to get XDR DC namespace config: %s", err)
 		}
 
 		actual, ok := config[key]
 		if !ok {
-			return fmt.Errorf("namespace param %q not found in server config for %s/%s", key, dc, namespace)
+			return fmt.Errorf("namespace param %q not found in server config for %s/%s", key, "test-dc", "aerospike")
 		}
 		if actual != expected {
 			return fmt.Errorf("namespace param %q: expected %q, got %q", key, expected, actual)

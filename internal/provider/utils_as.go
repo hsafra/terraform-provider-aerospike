@@ -310,4 +310,3 @@ func addXDRDCNamespaceIgnoreSet(conn *as.Client, dc, namespace, setName string) 
 	_, err := sendInfoCommand(conn, command)
 	return command, err
 }
-
