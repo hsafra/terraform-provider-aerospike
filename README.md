@@ -14,10 +14,7 @@ This allows automating Aerospike objects as IaC, allowing reviewing changes and 
 Initialize the provider with connection parmaeter in the provider block or environment variables.
 
 ## Future development
-- XDR filters
-- Set indexes
-- Cluster configuration
-- Namespace configuration
+- ?
 
 ## Developing the Provider
 

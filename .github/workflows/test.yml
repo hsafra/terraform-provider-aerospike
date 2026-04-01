@@ -68,11 +68,8 @@ jobs:
         # list whatever Terraform versions here you would like to support
         terraform:
           - '1.8.*'
-          - '1.9.*'
           - '1.10.*'
-          - '1.11.*'
           - '1.12.*'
-          - '1.13.*'
           - '1.14.*'
         aerospike:
           - version: '6.4.0.7'
