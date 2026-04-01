@@ -2,13 +2,12 @@
 FEATURES:
 * New `aerospike_service_config` resource for managing dynamic service-level configuration parameters
 * Singleton enforcement — only one `aerospike_service_config` instance allowed per provider
-* Multi-version test infrastructure with Aerospike v6, v7, and v8 source/target containers
-* Comprehensive acceptance tests for user and role resources
+* New `aerospike_namespace_config` resource for managing dynamic namespace and set-level configuration parameters
 
 ENHANCEMENTS:
-* New `aerospike_namespace_config` resource for managing dynamic namespace and set-level configuration parameters
 * Updated Terraform test matrix to versions 1.8 through 1.14
-* Updated Aerospike test versions to v6.4.0.7, v7.2.0.6, v8.1.1.1
+* Multi-version test infrastructure with Aerospike v6, v7, and v8 source/target containers
+* Comprehensive acceptance tests for user and role resources
 
 ## 0.4.2
 BUG FIXES:
