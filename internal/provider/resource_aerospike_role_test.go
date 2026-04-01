@@ -173,6 +173,7 @@ func TestAccAerospikeRole_privilegeTypes(t *testing.T) {
 	privilegeTypes := []string{
 		"read", "write", "read-write", "read-write-udf",
 		"sys-admin", "user-admin", "data-admin", "truncate",
+		"udf-admin", "sindex-admin",
 	}
 
 	for _, privType := range privilegeTypes {

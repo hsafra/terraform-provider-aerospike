@@ -6,8 +6,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -302,10 +304,50 @@ func (r *AerospikeXDRDCConfig) Read(ctx context.Context, req resource.ReadReques
 				policy.ShipOnlySpecifiedSets = types.BoolValue(sosVal == "true")
 			}
 
-			// ship-set and ignore-set are list-type params; the server returns them
-			// as comma-separated or colon-separated values. We keep the user's
-			// declared state since these are action-based (add/remove) rather than
-			// directly readable as a flat config key.
+			// Read shipped-sets from server, filtered to only user-declared sets.
+			// The server may contain extra sets from the move-to-opposite-list mechanism
+			// used to remove sets; we only report the ones the user manages.
+			if !policy.ShipSets.IsNull() {
+				declared := toStringSet(extractStringSlice(policy.ShipSets))
+				if val, ok := serverNsConfig["shipped-sets"]; ok && val != "" {
+					var filtered []string
+					for _, s := range splitAndTrim(val) {
+						if declared[s] {
+							filtered = append(filtered, s)
+						}
+					}
+					setVal, diags := types.SetValueFrom(ctx, types.StringType, filtered)
+					resp.Diagnostics.Append(diags...)
+					if resp.Diagnostics.HasError() {
+						return
+					}
+					policy.ShipSets = setVal
+				} else {
+					policy.ShipSets = types.SetValueMust(types.StringType, []attr.Value{})
+				}
+			}
+
+			// Read ignored-sets from server, filtered to only user-declared sets.
+			if !policy.IgnoreSets.IsNull() {
+				declared := toStringSet(extractStringSlice(policy.IgnoreSets))
+				if val, ok := serverNsConfig["ignored-sets"]; ok && val != "" {
+					var filtered []string
+					for _, s := range splitAndTrim(val) {
+						if declared[s] {
+							filtered = append(filtered, s)
+						}
+					}
+					setVal, diags := types.SetValueFrom(ctx, types.StringType, filtered)
+					resp.Diagnostics.Append(diags...)
+					if resp.Diagnostics.HasError() {
+						return
+					}
+					policy.IgnoreSets = setVal
+				} else {
+					policy.IgnoreSets = types.SetValueMust(types.StringType, []attr.Value{})
+				}
+			}
+
 			data.Namespaces[i].SetPolicy[0] = policy
 		}
 	}
@@ -697,7 +739,7 @@ func (r *AerospikeXDRDCConfig) updateNamespaceConfig(ctx context.Context, dc str
 	}
 
 	// Diff set_policy
-	diags.Append(r.diffSetPolicy(ctx, dc, nsName, state.SetPolicy, plan.SetPolicy, infoCommands)...)
+	diags.Append(r.diffSetPolicy(ctx, dc, nsName, plan.Params, state.SetPolicy, plan.SetPolicy, infoCommands)...)
 
 	return diags
 }
@@ -748,16 +790,11 @@ func (r *AerospikeXDRDCConfig) applySetPolicy(_ context.Context, dc, namespace s
 
 	// Add ship-sets
 	if !policy.ShipSets.IsNull() && !policy.ShipSets.IsUnknown() {
-		for _, elem := range policy.ShipSets.Elements() {
-			setName, ok := elem.(types.String)
-			if !ok {
-				continue
-			}
-			cmd, err := addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, setName.ValueString())
+		for _, s := range extractStringSlice(policy.ShipSets) {
+			cmd, err := addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
 			if err != nil {
 				diags.AddError("Error adding ship-set",
-					fmt.Sprintf("Failed to add ship-set %q on namespace %q in DC %q: %s",
-						setName.ValueString(), namespace, dc, err.Error()))
+					fmt.Sprintf("Failed to add ship-set %q on namespace %q in DC %q: %s", s, namespace, dc, err.Error()))
 				return diags
 			}
 			*infoCommands = append(*infoCommands, cmd)
@@ -766,16 +803,11 @@ func (r *AerospikeXDRDCConfig) applySetPolicy(_ context.Context, dc, namespace s
 
 	// Add ignore-sets
 	if !policy.IgnoreSets.IsNull() && !policy.IgnoreSets.IsUnknown() {
-		for _, elem := range policy.IgnoreSets.Elements() {
-			setName, ok := elem.(types.String)
-			if !ok {
-				continue
-			}
-			cmd, err := addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, setName.ValueString())
+		for _, s := range extractStringSlice(policy.IgnoreSets) {
+			cmd, err := addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
 			if err != nil {
 				diags.AddError("Error adding ignore-set",
-					fmt.Sprintf("Failed to add ignore-set %q on namespace %q in DC %q: %s",
-						setName.ValueString(), namespace, dc, err.Error()))
+					fmt.Sprintf("Failed to add ignore-set %q on namespace %q in DC %q: %s", s, namespace, dc, err.Error()))
 				return diags
 			}
 			*infoCommands = append(*infoCommands, cmd)
@@ -786,10 +818,12 @@ func (r *AerospikeXDRDCConfig) applySetPolicy(_ context.Context, dc, namespace s
 }
 
 // diffSetPolicy computes diffs between old and new set policies and applies changes.
-func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace string, oldPolicy, newPolicy []XDRSetPolicyModel, infoCommands *[]string) diag.Diagnostics {
+// Aerospike does not support action=remove for ship-set/ignore-set. To remove a set
+// from one list, you add it to the opposite list (ship-set removes from ignored-sets
+// and vice versa).
+func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace string, _ types.Map, oldPolicy, newPolicy []XDRSetPolicyModel, infoCommands *[]string) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	// If new policy exists, apply it
 	if len(newPolicy) > 0 {
 		np := newPolicy[0]
 
@@ -806,61 +840,63 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 		}
 		*infoCommands = append(*infoCommands, cmd)
 
-		// Compute ship-set diff
-		oldShipSets := extractStringSet(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.ShipSets })
-		newShipSets := extractStringSetValues(np.ShipSets)
+		oldShipSets := extractOldSets(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.ShipSets })
+		newShipSets := toStringSet(extractStringSlice(np.ShipSets))
+		oldIgnoreSets := extractOldSets(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.IgnoreSets })
+		newIgnoreSets := toStringSet(extractStringSlice(np.IgnoreSets))
 
+		// Step 1: Remove unwanted sets by moving them to the opposite list.
+		// To remove from shipped-sets, add to ignore-set; to remove from ignored-sets, add to ship-set.
+
+		// Remove old ship-sets not in new ship list
 		for s := range oldShipSets {
 			if !newShipSets[s] {
-				cmd, err := removeXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
-				if err != nil {
-					diags.AddError("Error removing ship-set",
-						fmt.Sprintf("Failed to remove ship-set %q: %s", s, err.Error()))
-					return diags
-				}
-				*infoCommands = append(*infoCommands, cmd)
-			}
-		}
-		for s := range newShipSets {
-			if !oldShipSets[s] {
-				cmd, err := addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
-				if err != nil {
-					diags.AddError("Error adding ship-set",
-						fmt.Sprintf("Failed to add ship-set %q: %s", s, err.Error()))
-					return diags
-				}
-				*infoCommands = append(*infoCommands, cmd)
-			}
-		}
-
-		// Compute ignore-set diff
-		oldIgnoreSets := extractStringSet(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.IgnoreSets })
-		newIgnoreSets := extractStringSetValues(np.IgnoreSets)
-
-		for s := range oldIgnoreSets {
-			if !newIgnoreSets[s] {
-				cmd, err := removeXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
-				if err != nil {
-					diags.AddError("Error removing ignore-set",
-						fmt.Sprintf("Failed to remove ignore-set %q: %s", s, err.Error()))
-					return diags
-				}
-				*infoCommands = append(*infoCommands, cmd)
-			}
-		}
-		for s := range newIgnoreSets {
-			if !oldIgnoreSets[s] {
 				cmd, err := addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
 				if err != nil {
-					diags.AddError("Error adding ignore-set",
-						fmt.Sprintf("Failed to add ignore-set %q: %s", s, err.Error()))
+					diags.AddError("Error removing ship-set",
+						fmt.Sprintf("Failed to move ship-set %q to ignore-set: %s", s, err.Error()))
 					return diags
 				}
 				*infoCommands = append(*infoCommands, cmd)
 			}
 		}
+
+		// Remove old ignore-sets not in new ignore list
+		for s := range oldIgnoreSets {
+			if !newIgnoreSets[s] {
+				cmd, err := addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
+				if err != nil {
+					diags.AddError("Error removing ignore-set",
+						fmt.Sprintf("Failed to move ignore-set %q to ship-set: %s", s, err.Error()))
+					return diags
+				}
+				*infoCommands = append(*infoCommands, cmd)
+			}
+		}
+
+		// Step 2: Add the desired new sets (adding to one list removes from the other).
+		for s := range newShipSets {
+			cmd, err := addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
+			if err != nil {
+				diags.AddError("Error adding ship-set",
+					fmt.Sprintf("Failed to add ship-set %q: %s", s, err.Error()))
+				return diags
+			}
+			*infoCommands = append(*infoCommands, cmd)
+		}
+
+		for s := range newIgnoreSets {
+			cmd, err := addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
+			if err != nil {
+				diags.AddError("Error adding ignore-set",
+					fmt.Sprintf("Failed to add ignore-set %q: %s", s, err.Error()))
+				return diags
+			}
+			*infoCommands = append(*infoCommands, cmd)
+		}
+
 	} else if len(oldPolicy) > 0 {
-		// Set policy removed — reset ship-only-specified-sets to default
+		// Set policy removed — reset ship-only-specified-sets
 		cmd, err := setXDRDCNamespaceParam(r.asConn.client, dc, namespace, "ship-only-specified-sets", "false")
 		if err != nil {
 			diags.AddError("Error resetting ship-only-specified-sets",
@@ -869,15 +905,20 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 		}
 		*infoCommands = append(*infoCommands, cmd)
 
-		// Remove all old ship-sets and ignore-sets
-		oldShipSets := extractStringSet(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.ShipSets })
+		// Move all old ship-sets to ignore-set to clear them, then back
+		oldShipSets := extractOldSets(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.ShipSets })
 		for s := range oldShipSets {
-			cmd, _ := removeXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
+			cmd, _ := addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
+			*infoCommands = append(*infoCommands, cmd)
+			cmd, _ = addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
 			*infoCommands = append(*infoCommands, cmd)
 		}
-		oldIgnoreSets := extractStringSet(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.IgnoreSets })
+		// Move all old ignore-sets to ship-set to clear them, then back
+		oldIgnoreSets := extractOldSets(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.IgnoreSets })
 		for s := range oldIgnoreSets {
-			cmd, _ := removeXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
+			cmd, _ := addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
+			*infoCommands = append(*infoCommands, cmd)
+			cmd, _ = addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
 			*infoCommands = append(*infoCommands, cmd)
 		}
 	}
@@ -885,8 +926,8 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 	return diags
 }
 
-// extractStringSet extracts a set of strings from the first element of a policy slice.
-func extractStringSet(policies []XDRSetPolicyModel, getter func(XDRSetPolicyModel) types.Set) map[string]bool {
+// extractOldSets extracts a set of strings from the first element of a policy slice.
+func extractOldSets(policies []XDRSetPolicyModel, getter func(XDRSetPolicyModel) types.Set) map[string]bool {
 	result := make(map[string]bool)
 	if len(policies) == 0 {
 		return result
@@ -903,15 +944,37 @@ func extractStringSet(policies []XDRSetPolicyModel, getter func(XDRSetPolicyMode
 	return result
 }
 
-// extractStringSetValues extracts a set of strings from a types.Set.
-func extractStringSetValues(s types.Set) map[string]bool {
-	result := make(map[string]bool)
+// toStringSet converts a string slice to a map[string]bool set.
+func toStringSet(ss []string) map[string]bool {
+	result := make(map[string]bool, len(ss))
+	for _, s := range ss {
+		result[s] = true
+	}
+	return result
+}
+
+// splitAndTrim splits a comma-separated string and trims whitespace from each element.
+func splitAndTrim(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// extractStringSlice extracts a []string from a types.Set.
+func extractStringSlice(s types.Set) []string {
+	var result []string
 	if s.IsNull() || s.IsUnknown() {
 		return result
 	}
 	for _, elem := range s.Elements() {
 		if str, ok := elem.(types.String); ok {
-			result[str.ValueString()] = true
+			result = append(result, str.ValueString())
 		}
 	}
 	return result

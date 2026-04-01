@@ -175,6 +175,35 @@ func TestAccAerospikeServiceConfig_singleton(t *testing.T) {
 	})
 }
 
+func TestAccAerospikeServiceConfig_multipleParams(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccServiceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeServiceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccServiceConfigMultipleParams(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-max", "25000"),
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-idle-ms", "60001"),
+					testAccCheckServiceParam("proto-fd-max", "25000"),
+					testAccCheckServiceParam("proto-fd-idle-ms", "60001"),
+				),
+			},
+		},
+	})
+}
+
+func testAccServiceConfigMultipleParams() string {
+	return `
+resource "aerospike_service_config" "test" {
+  params = {
+    "proto-fd-max"     = "25000"
+    "proto-fd-idle-ms" = "60001"
+  }
+}`
+}
+
 func testAccServiceConfigBasic() string {
 	return `
 resource "aerospike_service_config" "test" {

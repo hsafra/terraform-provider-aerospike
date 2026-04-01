@@ -67,7 +67,7 @@ func testAccGetNamespaceParam(namespace, key string) (string, error) {
 }
 
 // testAccCheckNamespaceParam verifies a namespace parameter has the expected value on the server.
-func testAccCheckNamespaceParam(namespace, key, expected string) resource.TestCheckFunc {
+func testAccCheckNamespaceParam(namespace, key, expected string) resource.TestCheckFunc { //nolint:unparam // namespace will vary as more tests are added
 	return func(s *terraform.State) error {
 		actual, err := testAccGetNamespaceParam(namespace, key)
 		if err != nil {
@@ -237,6 +237,104 @@ resource "aerospike_namespace_config" "test" {
     }
   }
 }`
+}
+
+func TestAccAerospikeNamespaceConfig_multipleParams(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccNamespaceConfigMultipleParams(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "namespace", "aerospike"),
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "150"),
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.background-query-max-rps", "5000"),
+					testAccCheckNamespaceParam("aerospike", "default-ttl", "150"),
+					testAccCheckNamespaceParam("aerospike", "background-query-max-rps", "5000"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccAerospikeNamespaceConfig_invalidNamespace(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccNamespaceConfigInvalidNamespace(),
+				ExpectError: regexp.MustCompile("Namespace not found"),
+			},
+		},
+	})
+}
+
+func TestAccAerospikeNamespaceConfig_updateSetConfig(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			// Create with set config
+			{
+				Config: testAccNamespaceConfigWithSetConfigValue("50000"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "namespace", "aerospike"),
+					resource.TestCheckResourceAttrSet("aerospike_namespace_config.test", "info_commands.#"),
+				),
+			},
+			// Update the set config value
+			{
+				Config: testAccNamespaceConfigWithSetConfigValue("60000"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("aerospike_namespace_config.test", "info_commands.#"),
+				),
+			},
+		},
+	})
+}
+
+func testAccNamespaceConfigMultipleParams() string {
+	return `
+resource "aerospike_namespace_config" "test" {
+  namespace = "aerospike"
+
+  params = {
+    "default-ttl"              = "150"
+    "background-query-max-rps" = "5000"
+  }
+}`
+}
+
+func testAccNamespaceConfigInvalidNamespace() string {
+	return `
+resource "aerospike_namespace_config" "test" {
+  namespace = "nonexistent_namespace_xyz"
+
+  params = {
+    "default-ttl" = "100"
+  }
+}`
+}
+
+func testAccNamespaceConfigWithSetConfigValue(stopWritesCount string) string {
+	return fmt.Sprintf(`
+resource "aerospike_namespace_config" "test" {
+  namespace = "aerospike"
+
+  params = {
+    "default-ttl" = "100"
+  }
+
+  set_config = {
+    "testset1" = {
+      "stop-writes-count" = "%s"
+    }
+  }
+}`, stopWritesCount)
 }
 
 func testAccNamespaceConfigWithSetConfig() string {
