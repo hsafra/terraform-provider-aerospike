@@ -19,3 +19,11 @@ services:
     environment:
       - FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf
     command: --config-file /opt/aerospike/etc/aerospike-ee-${AEROSPIKE_MAJOR_VERSION}-target.conf
+
+  aerospike-target2:
+    image: aerospike:ee-${AEROSPIKE_VERSION}
+    volumes:
+      - .:/opt/aerospike/etc/
+    environment:
+      - FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf
+    command: --config-file /opt/aerospike/etc/aerospike-ee-${AEROSPIKE_MAJOR_VERSION}-target.conf

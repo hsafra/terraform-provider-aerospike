@@ -297,6 +297,174 @@ func TestAccAerospikeNamespaceConfig_updateSetConfig(t *testing.T) {
 	})
 }
 
+// #14: Multiple sets configuration.
+func TestAccAerospikeNamespaceConfig_multipleSets(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccNamespaceConfigMultipleSets(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "namespace", "aerospike"),
+					resource.TestCheckResourceAttrSet("aerospike_namespace_config.test", "info_commands.#"),
+				),
+			},
+		},
+	})
+}
+
+// #15: Remove a param (go from 2 to 1).
+func TestAccAerospikeNamespaceConfig_removeParam(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			// Create with two params
+			{
+				Config: testAccNamespaceConfigMultipleParams(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "150"),
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.background-query-max-rps", "5000"),
+				),
+			},
+			// Remove one param — should warn but succeed
+			{
+				Config: testAccNamespaceConfigWithParam("default-ttl", "150"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "150"),
+					resource.TestCheckNoResourceAttr("aerospike_namespace_config.test", "params.background-query-max-rps"),
+				),
+			},
+		},
+	})
+}
+
+// #16: Update both namespace params and set config simultaneously.
+func TestAccAerospikeNamespaceConfig_paramsAndSetConfigTogether(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccNamespaceConfigWithSetConfigValue("50000"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "100"),
+					testAccCheckNamespaceParam("aerospike", "default-ttl", "100"),
+				),
+			},
+			// Update both namespace param and set config value at once
+			{
+				Config: testAccNamespaceConfigParamsAndSetConfig("250", "70000"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "250"),
+					testAccCheckNamespaceParam("aerospike", "default-ttl", "250"),
+				),
+			},
+		},
+	})
+}
+
+// #17: Remove set_config entirely.
+func TestAccAerospikeNamespaceConfig_removeSetConfig(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			// Create with set_config
+			{
+				Config: testAccNamespaceConfigWithSetConfigValue("50000"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "namespace", "aerospike"),
+				),
+			},
+			// Remove set_config — only keep namespace params
+			{
+				Config: testAccNamespaceConfigWithParam("default-ttl", "100"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "100"),
+				),
+			},
+		},
+	})
+}
+
+// #18: Server drift detection.
+func TestAccAerospikeNamespaceConfig_serverDrift(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			// Create with default-ttl = 400
+			{
+				Config: testAccNamespaceConfigWithParam("default-ttl", "400"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "400"),
+					testAccCheckNamespaceParam("aerospike", "default-ttl", "400"),
+				),
+			},
+			// Modify the param directly on the server, then re-apply — should fix drift
+			{
+				PreConfig: func() {
+					client, err := testAccGetAerospikeClient()
+					if err != nil {
+						t.Fatalf("failed to get client: %s", err)
+					}
+					defer client.Close()
+					_, _ = setNamespaceParam(client, "aerospike", "default-ttl", "999")
+				},
+				Config: testAccNamespaceConfigWithParam("default-ttl", "400"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "400"),
+					testAccCheckNamespaceParam("aerospike", "default-ttl", "400"),
+				),
+			},
+		},
+	})
+}
+
+func testAccNamespaceConfigMultipleSets() string {
+	return `
+resource "aerospike_namespace_config" "test" {
+  namespace = "aerospike"
+
+  params = {
+    "default-ttl" = "100"
+  }
+
+  set_config = {
+    "testset_a" = {
+      "stop-writes-count" = "50000"
+    }
+    "testset_b" = {
+      "stop-writes-count" = "60000"
+    }
+  }
+}`
+}
+
+func testAccNamespaceConfigParamsAndSetConfig(ttl, stopWritesCount string) string {
+	return fmt.Sprintf(`
+resource "aerospike_namespace_config" "test" {
+  namespace = "aerospike"
+
+  params = {
+    "default-ttl" = "%s"
+  }
+
+  set_config = {
+    "testset1" = {
+      "stop-writes-count" = "%s"
+    }
+  }
+}`, ttl, stopWritesCount)
+}
+
 func testAccNamespaceConfigMultipleParams() string {
 	return `
 resource "aerospike_namespace_config" "test" {

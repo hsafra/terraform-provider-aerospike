@@ -43,9 +43,11 @@ func testAccXDRDCConfigPreCheck(t *testing.T) {
 
 // cleanupTestDC attempts to remove a DC — ignores errors (DC may not exist).
 func cleanupTestDC(conn *as.Client, dc string) error {
-	// Try removing namespace, nodes, then DC
+	// Try removing namespaces, nodes, then DC
 	_, _ = removeXDRDCNamespace(conn, dc, "aerospike")
+	_, _ = removeXDRDCNamespace(conn, dc, "aerospike2")
 	_, _ = removeXDRDCNode(conn, dc, "aerospike-target:3000")
+	_, _ = removeXDRDCNode(conn, dc, "aerospike-target2:3000")
 	return removeXDRDC(conn, dc)
 }
 
@@ -446,6 +448,235 @@ func TestAccAerospikeXDRDCConfig_updateIgnoreSets(t *testing.T) {
 	})
 }
 
+// #23: DC with multiple namespaces.
+func TestAccAerospikeXDRDCConfig_multipleNamespaces(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccXDRDCConfigWithMultipleNamespaces(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "dc", "test-dc"),
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.#", "2"),
+					testAccCheckXDRDCExists("test-dc"),
+				),
+			},
+		},
+	})
+}
+
+// #24: Namespace rewind attribute.
+func TestAccAerospikeXDRDCConfig_namespaceRewind(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccXDRDCConfigWithRewind("all"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "dc", "test-dc"),
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.name", "aerospike"),
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.rewind", "all"),
+					testAccCheckXDRDCExists("test-dc"),
+				),
+			},
+		},
+	})
+}
+
+// #24b: Namespace rewind with numeric seconds.
+func TestAccAerospikeXDRDCConfig_namespaceRewindSeconds(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccXDRDCConfigWithRewind("100"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "dc", "test-dc"),
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.rewind", "100"),
+					testAccCheckXDRDCExists("test-dc"),
+				),
+			},
+		},
+	})
+}
+
+// #25: Remove set_policy block.
+func TestAccAerospikeXDRDCConfig_removeSetPolicy(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			// Create with ship_sets policy
+			{
+				Config: testAccXDRDCConfigWithShipSets(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.set_policy.0.ship_only_specified_sets", "true"),
+					testAccCheckXDRDCExists("test-dc"),
+					testAccCheckXDRDCNamespaceShipSets([]string{"users", "orders"}),
+				),
+			},
+			// Remove set_policy entirely — keep namespace but no set_policy block
+			{
+				Config: testAccXDRDCConfigWithNamespace(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.name", "aerospike"),
+					resource.TestCheckNoResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.set_policy.0.ship_only_specified_sets"),
+					testAccCheckXDRDCExists("test-dc"),
+					testAccCheckXDRDCNamespaceParam("ship-only-specified-sets", "false"),
+				),
+			},
+		},
+	})
+}
+
+// #26: ignore_sets with ship_only_specified_sets=true should error.
+func TestAccAerospikeXDRDCConfig_ignoreSetsWithShipOnlyTrue(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccXDRDCConfigIgnoreSetsWithShipOnlyTrue(),
+				ExpectError: regexp.MustCompile("ignore_sets requires ship_only_specified_sets=false"),
+			},
+		},
+	})
+}
+
+// #27: Reserved param in DC-level params.
+func TestAccAerospikeXDRDCConfig_reservedParamInDCParams(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccXDRDCConfigReservedDCParam(),
+				ExpectError: regexp.MustCompile("must be managed via the set_policy"),
+			},
+		},
+	})
+}
+
+// #28: Multiple nodes — add, swap, and diff.
+func TestAccAerospikeXDRDCConfig_updateMultipleNodes(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			// Create DC with one node
+			{
+				Config: testAccXDRDCConfigWithNodes([]string{"aerospike-target:3000"}),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "node_address_ports.#", "1"),
+					testAccCheckXDRDCExists("test-dc"),
+				),
+			},
+			// Update to two nodes (add second)
+			{
+				Config: testAccXDRDCConfigWithNodes([]string{"aerospike-target:3000", "aerospike-target2:3000"}),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "node_address_ports.#", "2"),
+					testAccCheckXDRDCExists("test-dc"),
+				),
+			},
+			// Remove one node, keep the other
+			{
+				Config: testAccXDRDCConfigWithNodes([]string{"aerospike-target2:3000"}),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "node_address_ports.#", "1"),
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "node_address_ports.0", "aerospike-target2:3000"),
+					testAccCheckXDRDCExists("test-dc"),
+				),
+			},
+		},
+	})
+}
+
+// #29: DC params and namespace params together.
+func TestAccAerospikeXDRDCConfig_dcParamsAndNamespaceParamsTogether(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccXDRDCConfigWithDCAndNamespaceParams("200", "100000"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "params.period-ms", "200"),
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.params.max-throughput", "100000"),
+					testAccCheckXDRDCExists("test-dc"),
+					testAccCheckXDRDCParam("test-dc", "period-ms", "200"),
+					testAccCheckXDRDCNamespaceParam("max-throughput", "100000"),
+				),
+			},
+		},
+	})
+}
+
+// #30: DC disappears outside Terraform.
+func TestAccAerospikeXDRDCConfig_disappearsOutsideTerraform(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccXDRDCConfigBasic(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckXDRDCExists("test-dc"),
+				),
+			},
+			// Delete DC outside Terraform, then re-apply — should recreate
+			{
+				PreConfig: func() {
+					client, err := testAccGetAerospikeClient()
+					if err != nil {
+						t.Fatalf("failed to get client: %s", err)
+					}
+					defer client.Close()
+					_ = removeXDRDC(client, "test-dc")
+				},
+				Config: testAccXDRDCConfigBasic(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckXDRDCExists("test-dc"),
+				),
+			},
+		},
+	})
+}
+
+// #31: Import a DC that has namespaces configured.
+func TestAccAerospikeXDRDCConfig_importWithNamespace(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccXDRDCConfigWithNamespace(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_xdr_dc_config.test", "namespace.0.name", "aerospike"),
+					testAccCheckXDRDCExists("test-dc"),
+				),
+			},
+			{
+				ResourceName:      "aerospike_xdr_dc_config.test",
+				ImportState:       true,
+				ImportStateVerify: false,
+				ImportStateId:     "test-dc",
+			},
+		},
+	})
+}
+
 // testAccCheckXDRDCNamespaceIgnoreSets verifies the server has exactly the expected ignore-sets.
 func testAccCheckXDRDCNamespaceIgnoreSets(dc, namespace string, expected []string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
@@ -744,4 +975,83 @@ resource "aerospike_xdr_dc_config" "test" {
     }
   }
 }`
+}
+
+func testAccXDRDCConfigWithMultipleNamespaces() string {
+	return `
+resource "aerospike_xdr_dc_config" "test" {
+  dc = "test-dc"
+
+  node_address_ports = ["aerospike-target:3000"]
+
+  namespace {
+    name = "aerospike"
+  }
+
+  namespace {
+    name = "aerospike2"
+  }
+}`
+}
+
+func testAccXDRDCConfigWithRewind(rewind string) string {
+	return fmt.Sprintf(`
+resource "aerospike_xdr_dc_config" "test" {
+  dc = "test-dc"
+
+  node_address_ports = ["aerospike-target:3000"]
+
+  namespace {
+    name   = "aerospike"
+    rewind = "%s"
+  }
+}`, rewind)
+}
+
+func testAccXDRDCConfigIgnoreSetsWithShipOnlyTrue() string {
+	return `
+resource "aerospike_xdr_dc_config" "test" {
+  dc = "test-dc"
+
+  namespace {
+    name = "aerospike"
+
+    set_policy {
+      ship_only_specified_sets = true
+      ignore_sets = ["temp"]
+    }
+  }
+}`
+}
+
+func testAccXDRDCConfigReservedDCParam() string {
+	return `
+resource "aerospike_xdr_dc_config" "test" {
+  dc = "test-dc"
+
+  params = {
+    "ship-set" = "users"
+  }
+}`
+}
+
+func testAccXDRDCConfigWithDCAndNamespaceParams(periodMs, maxThroughput string) string {
+	return fmt.Sprintf(`
+resource "aerospike_xdr_dc_config" "test" {
+  dc = "test-dc"
+
+  node_address_ports = ["aerospike-target:3000"]
+
+  params = {
+    "period-ms" = "%s"
+  }
+
+  namespace {
+    name = "aerospike"
+
+    params = {
+      "max-throughput" = "%s"
+    }
+  }
+}`, periodMs, maxThroughput)
 }

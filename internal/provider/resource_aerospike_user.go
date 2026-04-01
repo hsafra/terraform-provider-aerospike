@@ -145,12 +145,35 @@ func (r *AerospikeUser) Read(ctx context.Context, req resource.ReadRequest, resp
 		return
 	}
 
+	// Aerospike returns a one item array with "" for no roles, ignore just this case.
+	// Preserve the distinction: if the prior state had an explicit empty list (len 0),
+	// keep it as empty rather than nil to avoid a perpetual plan diff.
+	prevRoles := data.Roles
 	data.Roles = nil
-	// Aerospike returns a one item array with "" for no roles, ignore just this case
 	if len(tmpRoles.Roles) >= 1 && tmpRoles.Roles[0] != "" {
+		serverRoleSet := make(map[string]bool, len(tmpRoles.Roles))
 		for _, r := range tmpRoles.Roles {
-			data.Roles = append(data.Roles, types.StringValue(r))
+			serverRoleSet[r] = true
 		}
+
+		// Preserve the ordering from prior state to avoid perpetual diffs.
+		// Roles that were in the prior state keep their position; new roles are appended.
+		seen := make(map[string]bool)
+		for _, r := range prevRoles {
+			v := r.ValueString()
+			if serverRoleSet[v] {
+				data.Roles = append(data.Roles, types.StringValue(v))
+				seen[v] = true
+			}
+		}
+		for _, r := range tmpRoles.Roles {
+			if !seen[r] {
+				data.Roles = append(data.Roles, types.StringValue(r))
+			}
+		}
+	} else if prevRoles != nil {
+		// Server has no roles but state had an explicit (possibly empty) list — keep empty slice.
+		data.Roles = []types.String{}
 	}
 
 	tflog.Trace(ctx, "read user "+data.User_name.ValueString()+" with roles "+strings.Join(tmpRoles.Roles, ", "))
