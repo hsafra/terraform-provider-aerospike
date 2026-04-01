@@ -1,3 +1,9 @@
+## 0.6.0
+FEATURES:
+* New `aerospike_xdr_dc_config` resource for managing XDR datacenter configuration — full DC lifecycle, node management, namespace assignment with rewind support, and set shipping policies (`ship_sets`, `ignore_sets`, `ship_only_specified_sets`)
+* General-purpose parameter incompatibility validation framework
+* Set policy params (`ship-only-specified-sets`, `ship-set`, `ignore-set`) are fenced into a dedicated `set_policy` block to prevent misconfiguration
+
 ## 0.5.0
 FEATURES:
 * New `aerospike_service_config` resource for managing dynamic service-level configuration parameters
