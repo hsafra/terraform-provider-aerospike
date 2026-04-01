@@ -4,8 +4,10 @@
 package provider
 
 import (
+	"fmt"
 	"testing"
 
+	as "github.com/aerospike/aerospike-client-go/v7"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 )
@@ -19,7 +21,30 @@ var testAccProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServe
 }
 
 func testAccPreCheck(t *testing.T) {
-	// You can add code here to run prior to any test case execution, for example assertions
-	// about the appropriate environment variables being set are common to see in a pre-check
-	// function.
+	// Verify we can connect to the Aerospike cluster before running tests
+	client, err := testAccGetAerospikeClient()
+	if err != nil {
+		t.Fatalf("Unable to connect to Aerospike for acceptance tests: %s", err)
+	}
+	(*client).Close()
+}
+
+// testAccGetAerospikeClient returns an Aerospike client using the same
+// connection parameters as the provider (env vars or defaults from the Makefile).
+func testAccGetAerospikeClient() (*as.ClientIfc, error) {
+	host := withEnvironmentOverrideString("localhost", "AEROSPIKE_HOST")
+	port := withEnvironmentOverrideInt64(3000, "AEROSPIKE_PORT")
+	user := withEnvironmentOverrideString("admin", "AEROSPIKE_USER")
+	password := withEnvironmentOverrideString("admin", "AEROSPIKE_PASSWORD")
+
+	cp := as.NewClientPolicy()
+	cp.User = user
+	cp.Password = password
+
+	client, err := as.CreateClientWithPolicyAndHost(as.CTNative, cp, as.NewHost(host, int(port)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Aerospike client: %w", err)
+	}
+
+	return &client, nil
 }
