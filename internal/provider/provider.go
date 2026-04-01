@@ -204,6 +204,7 @@ func (p *AerospikeProvider) Resources(ctx context.Context) []func() resource.Res
 	return []func() resource.Resource{
 		NewAerospikeUser,
 		NewAerospikeRole,
+		NewAerospikeNamespaceConfig,
 	}
 }
 
