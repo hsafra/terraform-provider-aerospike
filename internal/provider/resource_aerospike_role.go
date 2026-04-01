@@ -6,8 +6,8 @@ package provider
 import (
 	"context"
 	"fmt"
-	as "github.com/aerospike/aerospike-client-go/v7"
-	astypes "github.com/aerospike/aerospike-client-go/v7/types"
+	as "github.com/aerospike/aerospike-client-go/v8"
+	astypes "github.com/aerospike/aerospike-client-go/v8/types"
 	"github.com/ghetzel/go-stockutil/sliceutil"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -169,7 +169,7 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 		var privModel AerospikeRolePrivilegeModel
 		p.As(ctx, &privModel, basetypes.ObjectAsOptions{})
 
-		if !privModel.Namespace.IsNull() && !namespaceExists(*r.asConn.client, privModel.Namespace.ValueString()) {
+		if !privModel.Namespace.IsNull() && !namespaceExists(r.asConn.client, privModel.Namespace.ValueString()) {
 			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Invalid namesace", "Namespace \""+privModel.Namespace.ValueString()+"\" does not exist in the cluster. Can't create role referencing it"))
 			return
 		}
@@ -184,7 +184,7 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 		whiteList = append(whiteList, w.ValueString())
 	}
 
-	err := (*r.asConn.client).CreateRole(adminPol, roleName, privileges, whiteList,
+	err := r.asConn.client.CreateRole(adminPol, roleName, privileges, whiteList,
 		readQuota, writeQuota)
 	if err != nil {
 		switch {
@@ -222,7 +222,7 @@ func (r *AerospikeRole) Read(ctx context.Context, req resource.ReadRequest, resp
 
 	adminPol := as.NewAdminPolicy()
 
-	role, err := (*r.asConn.client).QueryRole(adminPol, data.Role_name.ValueString())
+	role, err := r.asConn.client.QueryRole(adminPol, data.Role_name.ValueString())
 	if err != nil && !err.Matches(astypes.INVALID_ROLE) {
 		panic(err)
 	}
@@ -303,7 +303,7 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 			var privModel AerospikeRolePrivilegeModel
 			p.As(ctx, &privModel, basetypes.ObjectAsOptions{})
 
-			if !privModel.Namespace.IsNull() && !namespaceExists(*r.asConn.client, privModel.Namespace.ValueString()) {
+			if !privModel.Namespace.IsNull() && !namespaceExists(r.asConn.client, privModel.Namespace.ValueString()) {
 				resp.Diagnostics.Append(diag.NewErrorDiagnostic("Invalid namesace", "Namespace \""+privModel.Namespace.ValueString()+"\" does not exist in the cluster. Can't create role referencing it"))
 				return
 			}
@@ -337,13 +337,13 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 		}
 
 		if len(privsToAdd) > 0 {
-			err := (*r.asConn.client).GrantPrivileges(adminPol, plan.Role_name.ValueString(), privsToAdd)
+			err := r.asConn.client.GrantPrivileges(adminPol, plan.Role_name.ValueString(), privsToAdd)
 			if err != nil {
 				panic(err)
 			}
 		}
 		if len(privsToRevoke) > 0 {
-			err := (*r.asConn.client).RevokePrivileges(adminPol, plan.Role_name.ValueString(), privsToRevoke)
+			err := r.asConn.client.RevokePrivileges(adminPol, plan.Role_name.ValueString(), privsToRevoke)
 			if err != nil {
 				panic(err)
 			}
@@ -359,7 +359,7 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 		for _, w := range plan.White_list {
 			whiteList = append(whiteList, w.ValueString())
 		}
-		err := (*r.asConn.client).SetWhitelist(adminPol, data.Role_name.ValueString(), whiteList)
+		err := r.asConn.client.SetWhitelist(adminPol, data.Role_name.ValueString(), whiteList)
 		if err != nil {
 			panic(err)
 		}
@@ -368,7 +368,7 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	//qoutas
 	if plan.Read_quota != state.Read_quota || plan.Write_quota != state.Write_quota {
-		err := (*r.asConn.client).SetQuotas(adminPol, data.Role_name.ValueString(), uint32(plan.Read_quota.ValueInt64()),
+		err := r.asConn.client.SetQuotas(adminPol, data.Role_name.ValueString(), uint32(plan.Read_quota.ValueInt64()),
 			uint32(plan.Write_quota.ValueInt64()))
 		if err != nil && err.Matches(astypes.QUOTAS_NOT_ENABLED) {
 			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Quotas not enabled", "Role quotas are requests but not enabled in the server"))
@@ -396,7 +396,7 @@ func (r *AerospikeRole) Delete(ctx context.Context, req resource.DeleteRequest, 
 
 	adminPol := as.NewAdminPolicy()
 
-	err := (*r.asConn.client).DropRole(adminPol, data.Role_name.ValueString())
+	err := r.asConn.client.DropRole(adminPol, data.Role_name.ValueString())
 	if err != nil && !err.Matches(astypes.INVALID_ROLE) {
 		panic(err)
 	}

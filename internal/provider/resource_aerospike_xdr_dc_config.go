@@ -176,7 +176,7 @@ func (r *AerospikeXDRDCConfig) Create(ctx context.Context, req resource.CreateRe
 	}
 
 	// Create the DC
-	cmd, err := createXDRDC(*r.asConn.client, dc)
+	cmd, err := createXDRDC(r.asConn.client, dc)
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating XDR datacenter",
 			fmt.Sprintf("Failed to create datacenter %q: %s", dc, err.Error()))
@@ -230,7 +230,7 @@ func (r *AerospikeXDRDCConfig) Read(ctx context.Context, req resource.ReadReques
 	dc := data.DC.ValueString()
 
 	// Check DC still exists
-	if !dcExists(*r.asConn.client, dc) {
+	if !dcExists(r.asConn.client, dc) {
 		resp.State.RemoveResource(ctx)
 		tflog.Trace(ctx, "XDR DC "+dc+" no longer exists, removing from state")
 		return
@@ -238,7 +238,7 @@ func (r *AerospikeXDRDCConfig) Read(ctx context.Context, req resource.ReadReques
 
 	// Read DC-level params
 	if !data.Params.IsNull() {
-		serverConfig, err := getXDRDCConfig(*r.asConn.client, dc)
+		serverConfig, err := getXDRDCConfig(r.asConn.client, dc)
 		if err != nil {
 			resp.Diagnostics.AddError("Error reading XDR DC config",
 				fmt.Sprintf("Could not read config for DC %q: %s", dc, err.Error()))
@@ -267,7 +267,7 @@ func (r *AerospikeXDRDCConfig) Read(ctx context.Context, req resource.ReadReques
 		nsName := ns.Name.ValueString()
 
 		if !ns.Params.IsNull() {
-			serverNsConfig, err := getXDRDCNamespaceConfig(*r.asConn.client, dc, nsName)
+			serverNsConfig, err := getXDRDCNamespaceConfig(r.asConn.client, dc, nsName)
 			if err != nil {
 				tflog.Trace(ctx, fmt.Sprintf("could not read XDR DC namespace config for %s/%s: %s", dc, nsName, err.Error()))
 				continue
@@ -289,7 +289,7 @@ func (r *AerospikeXDRDCConfig) Read(ctx context.Context, req resource.ReadReques
 
 		// Read set policy state from server config
 		if len(ns.SetPolicy) > 0 {
-			serverNsConfig, err := getXDRDCNamespaceConfig(*r.asConn.client, dc, nsName)
+			serverNsConfig, err := getXDRDCNamespaceConfig(r.asConn.client, dc, nsName)
 			if err != nil {
 				tflog.Trace(ctx, fmt.Sprintf("could not read XDR DC namespace config for set_policy %s/%s: %s", dc, nsName, err.Error()))
 				continue
@@ -380,7 +380,7 @@ func (r *AerospikeXDRDCConfig) Update(ctx context.Context, req resource.UpdateRe
 	// Remove namespaces no longer in plan
 	for nsName := range stateNsMap {
 		if _, exists := planNsMap[nsName]; !exists {
-			cmd, err := removeXDRDCNamespace(*r.asConn.client, dc, nsName)
+			cmd, err := removeXDRDCNamespace(r.asConn.client, dc, nsName)
 			if err != nil {
 				resp.Diagnostics.AddError("Error removing XDR DC namespace",
 					fmt.Sprintf("Failed to remove namespace %q from DC %q: %s", nsName, dc, err.Error()))
@@ -432,7 +432,7 @@ func (r *AerospikeXDRDCConfig) Delete(ctx context.Context, req resource.DeleteRe
 
 	// Remove namespaces first
 	for _, ns := range data.Namespaces {
-		_, err := removeXDRDCNamespace(*r.asConn.client, dc, ns.Name.ValueString())
+		_, err := removeXDRDCNamespace(r.asConn.client, dc, ns.Name.ValueString())
 		if err != nil {
 			tflog.Trace(ctx, fmt.Sprintf("could not remove namespace %q from DC %q during destroy: %s",
 				ns.Name.ValueString(), dc, err.Error()))
@@ -443,7 +443,7 @@ func (r *AerospikeXDRDCConfig) Delete(ctx context.Context, req resource.DeleteRe
 	if !data.NodeAddressPorts.IsNull() {
 		for _, elem := range data.NodeAddressPorts.Elements() {
 			if addr, ok := elem.(types.String); ok {
-				_, err := removeXDRDCNode(*r.asConn.client, dc, addr.ValueString())
+				_, err := removeXDRDCNode(r.asConn.client, dc, addr.ValueString())
 				if err != nil {
 					tflog.Trace(ctx, fmt.Sprintf("could not remove node %q from DC %q during destroy: %s",
 						addr.ValueString(), dc, err.Error()))
@@ -454,7 +454,7 @@ func (r *AerospikeXDRDCConfig) Delete(ctx context.Context, req resource.DeleteRe
 
 	// Delete the DC (retries internally — Aerospike may need a moment
 	// after namespace/node removal before the DC can be deleted)
-	err := removeXDRDC(*r.asConn.client, dc)
+	err := removeXDRDC(r.asConn.client, dc)
 	if err != nil {
 		resp.Diagnostics.AddError("Error removing XDR datacenter",
 			fmt.Sprintf("Failed to remove datacenter %q: %s", dc, err.Error()))
@@ -467,7 +467,7 @@ func (r *AerospikeXDRDCConfig) Delete(ctx context.Context, req resource.DeleteRe
 func (r *AerospikeXDRDCConfig) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	dc := req.ID
 
-	if !dcExists(*r.asConn.client, dc) {
+	if !dcExists(r.asConn.client, dc) {
 		resp.Diagnostics.AddError("DC not found",
 			fmt.Sprintf("Datacenter %q does not exist on the Aerospike server.", dc))
 		return
@@ -554,7 +554,7 @@ func (r *AerospikeXDRDCConfig) applyNodes(_ context.Context, dc string, nodes ty
 			return diags
 		}
 
-		cmd, err := addXDRDCNode(*r.asConn.client, dc, addr.ValueString())
+		cmd, err := addXDRDCNode(r.asConn.client, dc, addr.ValueString())
 		if err != nil {
 			diags.AddError("Error adding XDR DC node",
 				fmt.Sprintf("Failed to add node %q to DC %q: %s", addr.ValueString(), dc, err.Error()))
@@ -592,7 +592,7 @@ func (r *AerospikeXDRDCConfig) diffNodes(_ context.Context, dc string, oldNodes,
 	// Remove nodes no longer in plan
 	for addr := range oldSet {
 		if !newSet[addr] {
-			cmd, err := removeXDRDCNode(*r.asConn.client, dc, addr)
+			cmd, err := removeXDRDCNode(r.asConn.client, dc, addr)
 			if err != nil {
 				diags.AddError("Error removing XDR DC node",
 					fmt.Sprintf("Failed to remove node %q from DC %q: %s", addr, dc, err.Error()))
@@ -605,7 +605,7 @@ func (r *AerospikeXDRDCConfig) diffNodes(_ context.Context, dc string, oldNodes,
 	// Add new nodes
 	for addr := range newSet {
 		if !oldSet[addr] {
-			cmd, err := addXDRDCNode(*r.asConn.client, dc, addr)
+			cmd, err := addXDRDCNode(r.asConn.client, dc, addr)
 			if err != nil {
 				diags.AddError("Error adding XDR DC node",
 					fmt.Sprintf("Failed to add node %q to DC %q: %s", addr, dc, err.Error()))
@@ -630,7 +630,7 @@ func (r *AerospikeXDRDCConfig) applyDCParams(ctx context.Context, dc string, par
 			continue
 		}
 
-		cmd, err := setXDRDCParam(*r.asConn.client, dc, key, strVal.ValueString())
+		cmd, err := setXDRDCParam(r.asConn.client, dc, key, strVal.ValueString())
 		if err != nil {
 			diags.AddError("Error setting XDR DC parameter",
 				fmt.Sprintf("Failed to set DC parameter %q=%q on DC %q: %s", key, strVal.ValueString(), dc, err.Error()))
@@ -655,7 +655,7 @@ func (r *AerospikeXDRDCConfig) addAndConfigureNamespace(ctx context.Context, dc 
 	}
 
 	// Add namespace to DC first
-	cmd, err := addXDRDCNamespace(*r.asConn.client, dc, nsName, rewind)
+	cmd, err := addXDRDCNamespace(r.asConn.client, dc, nsName, rewind)
 	if err != nil {
 		diags.AddError("Error adding XDR DC namespace",
 			fmt.Sprintf("Failed to add namespace %q to DC %q: %s", nsName, dc, err.Error()))
@@ -714,7 +714,7 @@ func (r *AerospikeXDRDCConfig) applyNamespaceParams(ctx context.Context, dc, nam
 			continue
 		}
 
-		cmd, err := setXDRDCNamespaceParam(*r.asConn.client, dc, namespace, key, strVal.ValueString())
+		cmd, err := setXDRDCNamespaceParam(r.asConn.client, dc, namespace, key, strVal.ValueString())
 		if err != nil {
 			diags.AddError("Error setting XDR DC namespace parameter",
 				fmt.Sprintf("Failed to set parameter %q=%q on namespace %q in DC %q: %s",
@@ -738,7 +738,7 @@ func (r *AerospikeXDRDCConfig) applySetPolicy(_ context.Context, dc, namespace s
 	if policy.ShipOnlySpecifiedSets.ValueBool() {
 		sosVal = "true"
 	}
-	cmd, err := setXDRDCNamespaceParam(*r.asConn.client, dc, namespace, "ship-only-specified-sets", sosVal)
+	cmd, err := setXDRDCNamespaceParam(r.asConn.client, dc, namespace, "ship-only-specified-sets", sosVal)
 	if err != nil {
 		diags.AddError("Error setting ship-only-specified-sets",
 			fmt.Sprintf("Failed on namespace %q in DC %q: %s", namespace, dc, err.Error()))
@@ -753,7 +753,7 @@ func (r *AerospikeXDRDCConfig) applySetPolicy(_ context.Context, dc, namespace s
 			if !ok {
 				continue
 			}
-			cmd, err := addXDRDCNamespaceShipSet(*r.asConn.client, dc, namespace, setName.ValueString())
+			cmd, err := addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, setName.ValueString())
 			if err != nil {
 				diags.AddError("Error adding ship-set",
 					fmt.Sprintf("Failed to add ship-set %q on namespace %q in DC %q: %s",
@@ -771,7 +771,7 @@ func (r *AerospikeXDRDCConfig) applySetPolicy(_ context.Context, dc, namespace s
 			if !ok {
 				continue
 			}
-			cmd, err := addXDRDCNamespaceIgnoreSet(*r.asConn.client, dc, namespace, setName.ValueString())
+			cmd, err := addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, setName.ValueString())
 			if err != nil {
 				diags.AddError("Error adding ignore-set",
 					fmt.Sprintf("Failed to add ignore-set %q on namespace %q in DC %q: %s",
@@ -798,7 +798,7 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 		if np.ShipOnlySpecifiedSets.ValueBool() {
 			sosVal = "true"
 		}
-		cmd, err := setXDRDCNamespaceParam(*r.asConn.client, dc, namespace, "ship-only-specified-sets", sosVal)
+		cmd, err := setXDRDCNamespaceParam(r.asConn.client, dc, namespace, "ship-only-specified-sets", sosVal)
 		if err != nil {
 			diags.AddError("Error setting ship-only-specified-sets",
 				fmt.Sprintf("Failed on namespace %q in DC %q: %s", namespace, dc, err.Error()))
@@ -812,7 +812,7 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 
 		for s := range oldShipSets {
 			if !newShipSets[s] {
-				cmd, err := removeXDRDCNamespaceShipSet(*r.asConn.client, dc, namespace, s)
+				cmd, err := removeXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
 				if err != nil {
 					diags.AddError("Error removing ship-set",
 						fmt.Sprintf("Failed to remove ship-set %q: %s", s, err.Error()))
@@ -823,7 +823,7 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 		}
 		for s := range newShipSets {
 			if !oldShipSets[s] {
-				cmd, err := addXDRDCNamespaceShipSet(*r.asConn.client, dc, namespace, s)
+				cmd, err := addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
 				if err != nil {
 					diags.AddError("Error adding ship-set",
 						fmt.Sprintf("Failed to add ship-set %q: %s", s, err.Error()))
@@ -839,7 +839,7 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 
 		for s := range oldIgnoreSets {
 			if !newIgnoreSets[s] {
-				cmd, err := removeXDRDCNamespaceIgnoreSet(*r.asConn.client, dc, namespace, s)
+				cmd, err := removeXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
 				if err != nil {
 					diags.AddError("Error removing ignore-set",
 						fmt.Sprintf("Failed to remove ignore-set %q: %s", s, err.Error()))
@@ -850,7 +850,7 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 		}
 		for s := range newIgnoreSets {
 			if !oldIgnoreSets[s] {
-				cmd, err := addXDRDCNamespaceIgnoreSet(*r.asConn.client, dc, namespace, s)
+				cmd, err := addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
 				if err != nil {
 					diags.AddError("Error adding ignore-set",
 						fmt.Sprintf("Failed to add ignore-set %q: %s", s, err.Error()))
@@ -861,7 +861,7 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 		}
 	} else if len(oldPolicy) > 0 {
 		// Set policy removed — reset ship-only-specified-sets to default
-		cmd, err := setXDRDCNamespaceParam(*r.asConn.client, dc, namespace, "ship-only-specified-sets", "false")
+		cmd, err := setXDRDCNamespaceParam(r.asConn.client, dc, namespace, "ship-only-specified-sets", "false")
 		if err != nil {
 			diags.AddError("Error resetting ship-only-specified-sets",
 				fmt.Sprintf("Failed on namespace %q in DC %q: %s", namespace, dc, err.Error()))
@@ -872,12 +872,12 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 		// Remove all old ship-sets and ignore-sets
 		oldShipSets := extractStringSet(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.ShipSets })
 		for s := range oldShipSets {
-			cmd, _ := removeXDRDCNamespaceShipSet(*r.asConn.client, dc, namespace, s)
+			cmd, _ := removeXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
 			*infoCommands = append(*infoCommands, cmd)
 		}
 		oldIgnoreSets := extractStringSet(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.IgnoreSets })
 		for s := range oldIgnoreSets {
-			cmd, _ := removeXDRDCNamespaceIgnoreSet(*r.asConn.client, dc, namespace, s)
+			cmd, _ := removeXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
 			*infoCommands = append(*infoCommands, cmd)
 		}
 	}

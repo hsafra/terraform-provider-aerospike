@@ -6,8 +6,8 @@ package provider
 import (
 	"context"
 	"fmt"
-	as "github.com/aerospike/aerospike-client-go/v7"
-	astypes "github.com/aerospike/aerospike-client-go/v7/types"
+	as "github.com/aerospike/aerospike-client-go/v8"
+	astypes "github.com/aerospike/aerospike-client-go/v8/types"
 	"github.com/ghetzel/go-stockutil/sliceutil"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -109,7 +109,7 @@ func (r *AerospikeUser) Create(ctx context.Context, req resource.CreateRequest, 
 		tmpRoles = append(tmpRoles, r.ValueString())
 	}
 
-	err := (*r.asConn.client).CreateUser(adminPol, data.User_name.ValueString(), data.Password.ValueString(), tmpRoles)
+	err := r.asConn.client.CreateUser(adminPol, data.User_name.ValueString(), data.Password.ValueString(), tmpRoles)
 	if err != nil {
 		panic(err)
 	}
@@ -133,7 +133,7 @@ func (r *AerospikeUser) Read(ctx context.Context, req resource.ReadRequest, resp
 
 	adminPol := as.NewAdminPolicy()
 
-	tmpRoles, err := (*r.asConn.client).QueryUser(adminPol, data.User_name.ValueString())
+	tmpRoles, err := r.asConn.client.QueryUser(adminPol, data.User_name.ValueString())
 	if err != nil && !err.Matches(astypes.INVALID_USER) {
 		panic(err)
 	}
@@ -175,7 +175,7 @@ func (r *AerospikeUser) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	if !plan.Password.Equal(state.Password) {
 		adminPol := as.NewAdminPolicy()
-		err := (*r.asConn.client).ChangePassword(adminPol, plan.User_name.ValueString(), plan.Password.ValueString())
+		err := r.asConn.client.ChangePassword(adminPol, plan.User_name.ValueString(), plan.Password.ValueString())
 		if err != nil {
 			panic(err)
 		}
@@ -208,13 +208,13 @@ func (r *AerospikeUser) Update(ctx context.Context, req resource.UpdateRequest, 
 		adminPol := as.NewAdminPolicy()
 
 		if len(rolesToAdd) > 0 {
-			err := (*r.asConn.client).GrantRoles(adminPol, plan.User_name.ValueString(), rolesToAdd)
+			err := r.asConn.client.GrantRoles(adminPol, plan.User_name.ValueString(), rolesToAdd)
 			if err != nil {
 				panic(err)
 			}
 		}
 		if len(rolesToRevoke) > 0 {
-			err := (*r.asConn.client).RevokeRoles(adminPol, plan.User_name.ValueString(), rolesToRevoke)
+			err := r.asConn.client.RevokeRoles(adminPol, plan.User_name.ValueString(), rolesToRevoke)
 			if err != nil {
 				panic(err)
 			}
@@ -238,7 +238,7 @@ func (r *AerospikeUser) Delete(ctx context.Context, req resource.DeleteRequest, 
 
 	adminPol := as.NewAdminPolicy()
 
-	err := (*r.asConn.client).DropUser(adminPol, data.User_name.ValueString())
+	err := r.asConn.client.DropUser(adminPol, data.User_name.ValueString())
 	if err != nil && !err.Matches(astypes.INVALID_USER) {
 		panic(err)
 	}

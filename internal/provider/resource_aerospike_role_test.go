@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"testing"
 
-	as "github.com/aerospike/aerospike-client-go/v7"
-	astypes "github.com/aerospike/aerospike-client-go/v7/types"
+	as "github.com/aerospike/aerospike-client-go/v8"
+	astypes "github.com/aerospike/aerospike-client-go/v8/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -19,7 +19,7 @@ func testAccCheckAerospikeRoleDestroy(s *terraform.State) error {
 	if err != nil {
 		return err
 	}
-	defer (*client).Close()
+	defer client.Close()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "aerospike_role" {
@@ -27,7 +27,7 @@ func testAccCheckAerospikeRoleDestroy(s *terraform.State) error {
 		}
 
 		adminPol := as.NewAdminPolicy()
-		_, queryErr := (*client).QueryRole(adminPol, rs.Primary.Attributes["role_name"])
+		_, queryErr := client.QueryRole(adminPol, rs.Primary.Attributes["role_name"])
 		if queryErr == nil {
 			return fmt.Errorf("aerospike role %s still exists", rs.Primary.Attributes["role_name"])
 		}

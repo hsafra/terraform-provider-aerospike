@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"testing"
 
-	as "github.com/aerospike/aerospike-client-go/v7"
+	as "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 )
@@ -26,12 +26,12 @@ func testAccPreCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to connect to Aerospike for acceptance tests: %s", err)
 	}
-	(*client).Close()
+	client.Close()
 }
 
 // testAccGetAerospikeClient returns an Aerospike client using the same
 // connection parameters as the provider (env vars or defaults from the Makefile).
-func testAccGetAerospikeClient() (*as.ClientIfc, error) {
+func testAccGetAerospikeClient() (*as.Client, error) {
 	host := withEnvironmentOverrideString("localhost", "AEROSPIKE_HOST")
 	port := withEnvironmentOverrideInt64(3000, "AEROSPIKE_PORT")
 	user := withEnvironmentOverrideString("admin", "AEROSPIKE_USER")
@@ -41,10 +41,10 @@ func testAccGetAerospikeClient() (*as.ClientIfc, error) {
 	cp.User = user
 	cp.Password = password
 
-	client, err := as.CreateClientWithPolicyAndHost(as.CTNative, cp, as.NewHost(host, int(port)))
+	client, err := as.NewClientWithPolicyAndHost(cp, as.NewHost(host, int(port)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Aerospike client: %w", err)
 	}
 
-	return &client, nil
+	return client, nil
 }

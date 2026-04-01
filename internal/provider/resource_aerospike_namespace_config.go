@@ -105,7 +105,7 @@ func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.Crea
 	namespace := data.Namespace.ValueString()
 
 	// Validate namespace exists
-	if !namespaceExists(*r.asConn.client, namespace) {
+	if !namespaceExists(r.asConn.client, namespace) {
 		resp.Diagnostics.AddError("Namespace not found",
 			fmt.Sprintf("Namespace %q does not exist on the Aerospike server.", namespace))
 		return
@@ -155,14 +155,14 @@ func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRe
 	namespace := data.Namespace.ValueString()
 
 	// Check namespace still exists
-	if !namespaceExists(*r.asConn.client, namespace) {
+	if !namespaceExists(r.asConn.client, namespace) {
 		resp.State.RemoveResource(ctx)
 		tflog.Trace(ctx, "namespace "+namespace+" no longer exists, removing from state")
 		return
 	}
 
 	// Read current namespace config from server
-	serverConfig, err := getNamespaceConfig(*r.asConn.client, namespace)
+	serverConfig, err := getNamespaceConfig(r.asConn.client, namespace)
 	if err != nil {
 		resp.Diagnostics.AddError("Error reading namespace config",
 			fmt.Sprintf("Could not read config for namespace %q: %s", namespace, err.Error()))
@@ -199,7 +199,7 @@ func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRe
 				continue
 			}
 
-			serverSetConfig, err := getSetConfig(*r.asConn.client, namespace, setName)
+			serverSetConfig, err := getSetConfig(r.asConn.client, namespace, setName)
 			if err != nil {
 				// Best-effort: keep state as-is for this set
 				tflog.Trace(ctx, fmt.Sprintf("could not read set config for %s/%s: %s", namespace, setName, err.Error()))
@@ -331,7 +331,7 @@ func (r *AerospikeNamespaceConfig) applyNamespaceParams(ctx context.Context, nam
 	var diags diag.Diagnostics
 
 	// Read current config to validate param keys
-	serverConfig, err := getNamespaceConfig(*r.asConn.client, namespace)
+	serverConfig, err := getNamespaceConfig(r.asConn.client, namespace)
 	if err != nil {
 		diags.AddError("Error reading namespace config",
 			fmt.Sprintf("Could not read current config for namespace %q to validate parameters: %s", namespace, err.Error()))
@@ -355,7 +355,7 @@ func (r *AerospikeNamespaceConfig) applyNamespaceParams(ctx context.Context, nam
 			continue
 		}
 
-		command, err := setNamespaceParam(*r.asConn.client, namespace, key, strVal.ValueString())
+		command, err := setNamespaceParam(r.asConn.client, namespace, key, strVal.ValueString())
 		if err != nil {
 			diags.AddError("Error setting namespace parameter",
 				fmt.Sprintf("Failed to set parameter %q=%q on namespace %q: %s", key, strVal.ValueString(), namespace, err.Error()))
@@ -383,7 +383,7 @@ func (r *AerospikeNamespaceConfig) applySetParams(ctx context.Context, namespace
 		}
 
 		// Validate set param keys against server
-		validKeys, err := getValidSetParamKeys(*r.asConn.client, namespace, setName)
+		validKeys, err := getValidSetParamKeys(r.asConn.client, namespace, setName)
 		if err != nil {
 			diags.AddError("Error reading set config",
 				fmt.Sprintf("Could not read set info for %q in namespace %q to validate parameters: %s", setName, namespace, err.Error()))
@@ -412,7 +412,7 @@ func (r *AerospikeNamespaceConfig) applySetParams(ctx context.Context, namespace
 				continue
 			}
 
-			command, err := setNamespaceSetParam(*r.asConn.client, namespace, setName, key, strVal.ValueString())
+			command, err := setNamespaceSetParam(r.asConn.client, namespace, setName, key, strVal.ValueString())
 			if err != nil {
 				diags.AddError("Error setting set parameter",
 					fmt.Sprintf("Failed to set parameter %q=%q on set %q in namespace %q: %s",
