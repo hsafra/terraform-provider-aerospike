@@ -15,7 +15,9 @@ Initialize the provider with connection parmaeter in the provider block or envir
 
 ## Future development
 - XDR filters
-- Secondary indexes
+- Set indexes
+- Cluster configuration
+- Namespace configuration
 
 ## Developing the Provider
 
