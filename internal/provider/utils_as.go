@@ -152,3 +152,30 @@ func setNamespaceSetParam(conn as.ClientIfc, namespace, setName, key, value stri
 	_, err := sendInfoCommand(conn, command)
 	return command, err
 }
+
+// getServiceConfig reads all service configuration parameters via get-config and returns them as a map.
+func getServiceConfig(conn as.ClientIfc) (map[string]string, error) {
+	command := "get-config:context=service"
+	result, err := sendInfoCommand(conn, command)
+	if err != nil {
+		return nil, err
+	}
+
+	config := make(map[string]string)
+	raw := result[command]
+	pairs := strings.Split(raw, ";")
+	for _, pair := range pairs {
+		kv := strings.SplitN(pair, "=", 2)
+		if len(kv) == 2 {
+			config[kv[0]] = kv[1]
+		}
+	}
+	return config, nil
+}
+
+// setServiceParam sets a single service-level configuration parameter via set-config.
+func setServiceParam(conn as.ClientIfc, key, value string) (string, error) {
+	command := "set-config:context=service;" + key + "=" + value
+	_, err := sendInfoCommand(conn, command)
+	return command, err
+}
