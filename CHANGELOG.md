@@ -7,6 +7,7 @@ FEATURES:
 * Set policy params (`ship-only-specified-sets`, `ship-set`, `ignore-set`) are fenced into a dedicated `set_policy` block to prevent misconfiguration
 
 ENHANCEMENTS:
+* Upgraded Aerospike Go client from v7.10.2 to v8.6.0
 * Updated Terraform test matrix to versions 1.8 through 1.14
 * Multi-version test infrastructure with Aerospike v6, v7, and v8 source/target containers
 * Comprehensive acceptance tests for user and role resources

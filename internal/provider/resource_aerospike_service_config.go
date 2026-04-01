@@ -130,7 +130,7 @@ func (r *AerospikeServiceConfig) Read(ctx context.Context, req resource.ReadRequ
 	}
 
 	// Read current service config from server
-	serverConfig, err := getServiceConfig(*r.asConn.client)
+	serverConfig, err := getServiceConfig(r.asConn.client)
 	if err != nil {
 		resp.Diagnostics.AddError("Error reading service config",
 			fmt.Sprintf("Could not read service config: %s", err.Error()))
@@ -251,7 +251,7 @@ func (r *AerospikeServiceConfig) applyServiceParams(ctx context.Context, params 
 	var diags diag.Diagnostics
 
 	// Read current config to validate param keys
-	serverConfig, err := getServiceConfig(*r.asConn.client)
+	serverConfig, err := getServiceConfig(r.asConn.client)
 	if err != nil {
 		diags.AddError("Error reading service config",
 			fmt.Sprintf("Could not read current service config to validate parameters: %s", err.Error()))
@@ -275,7 +275,7 @@ func (r *AerospikeServiceConfig) applyServiceParams(ctx context.Context, params 
 			continue
 		}
 
-		command, err := setServiceParam(*r.asConn.client, key, strVal.ValueString())
+		command, err := setServiceParam(r.asConn.client, key, strVal.ValueString())
 		if err != nil {
 			diags.AddError("Error setting service parameter",
 				fmt.Sprintf("Failed to set service parameter %q=%q: %s", key, strVal.ValueString(), err.Error()))

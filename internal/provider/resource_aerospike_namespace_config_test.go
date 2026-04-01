@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"testing"
 
-	as "github.com/aerospike/aerospike-client-go/v7"
+	as "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -24,23 +24,23 @@ func testAccNamespaceConfigPreCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to connect to Aerospike: %s", err)
 	}
-	defer (*client).Close()
+	defer client.Close()
 
 	adminPol := as.NewAdminPolicy()
-	_ = (*client).GrantRoles(adminPol, "admin", []string{"sys-admin", "read-write"})
+	_ = client.GrantRoles(adminPol, "admin", []string{"sys-admin", "read-write"})
 	// Close and reconnect so the new roles take effect on the connection
-	(*client).Close()
+	client.Close()
 
 	client, err = testAccGetAerospikeClient()
 	if err != nil {
 		t.Fatalf("Unable to reconnect to Aerospike after granting roles: %s", err)
 	}
-	defer (*client).Close()
+	defer client.Close()
 
 	// Write a dummy record to ensure a set exists (needed for set param validation)
 	key, _ := as.NewKey("aerospike", "dummy_validation_set", "dummy")
 	wp := as.NewWritePolicy(0, 60)
-	putErr := (*client).Put(wp, key, as.BinMap{"dummy": 1})
+	putErr := client.Put(wp, key, as.BinMap{"dummy": 1})
 	if putErr != nil {
 		t.Fatalf("Failed to create dummy set for validation: %s", putErr)
 	}
@@ -52,9 +52,9 @@ func testAccGetNamespaceParam(namespace, key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer (*client).Close()
+	defer client.Close()
 
-	config, err := getNamespaceConfig(*client, namespace)
+	config, err := getNamespaceConfig(client, namespace)
 	if err != nil {
 		return "", err
 	}

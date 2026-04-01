@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"testing"
 
-	as "github.com/aerospike/aerospike-client-go/v7"
+	as "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -23,18 +23,18 @@ func testAccServiceConfigPreCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to connect to Aerospike: %s", err)
 	}
-	defer (*client).Close()
+	defer client.Close()
 
 	adminPol := as.NewAdminPolicy()
-	_ = (*client).GrantRoles(adminPol, "admin", []string{"sys-admin"})
+	_ = client.GrantRoles(adminPol, "admin", []string{"sys-admin"})
 	// Close and reconnect so the new roles take effect on the connection
-	(*client).Close()
+	client.Close()
 
 	client, err = testAccGetAerospikeClient()
 	if err != nil {
 		t.Fatalf("Unable to reconnect to Aerospike after granting roles: %s", err)
 	}
-	defer (*client).Close()
+	defer client.Close()
 }
 
 // testAccGetServiceParam reads a service config parameter directly from Aerospike.
@@ -43,9 +43,9 @@ func testAccGetServiceParam(key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer (*client).Close()
+	defer client.Close()
 
-	config, err := getServiceConfig(*client)
+	config, err := getServiceConfig(client)
 	if err != nil {
 		return "", err
 	}

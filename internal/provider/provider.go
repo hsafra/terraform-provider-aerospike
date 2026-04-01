@@ -8,8 +8,8 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	as "github.com/aerospike/aerospike-client-go/v7"
-	astypes "github.com/aerospike/aerospike-client-go/v7/types"
+	as "github.com/aerospike/aerospike-client-go/v8"
+	astypes "github.com/aerospike/aerospike-client-go/v8/types"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -51,7 +51,7 @@ type AerospikeTLSConfigModel struct {
 }
 
 type asConnection struct {
-	client               *as.ClientIfc
+	client               *as.Client
 	serviceConfigClaimed int32 // atomic; enforces singleton aerospike_service_config
 }
 
@@ -112,7 +112,7 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 	var dataTLS AerospikeTLSConfigModel
 	var err as.Error
 	var asConn asConnection
-	var tempConn as.ClientIfc
+	var tempConn *as.Client
 
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 
@@ -184,7 +184,7 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 		}
 		cp.TlsConfig = &tlsConfig
 	}
-	tempConn, err = as.CreateClientWithPolicyAndHost(as.CTNative, cp, ash)
+	tempConn, err = as.NewClientWithPolicyAndHost(cp, ash)
 	if err != nil {
 		if err.Matches(astypes.TIMEOUT) {
 			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Timeout connecting to Aerospike",
@@ -195,7 +195,7 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 		}
 	}
 
-	asConn.client = &tempConn
+	asConn.client = tempConn
 
 	resp.DataSourceData = &asConn
 	resp.ResourceData = &asConn

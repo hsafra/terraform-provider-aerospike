@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"testing"
 
-	as "github.com/aerospike/aerospike-client-go/v7"
+	as "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -23,25 +23,25 @@ func testAccXDRDCConfigPreCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to connect to Aerospike: %s", err)
 	}
-	defer (*client).Close()
+	defer client.Close()
 
 	adminPol := as.NewAdminPolicy()
-	_ = (*client).GrantRoles(adminPol, "admin", []string{"sys-admin"})
-	(*client).Close()
+	_ = client.GrantRoles(adminPol, "admin", []string{"sys-admin"})
+	client.Close()
 
 	client, err = testAccGetAerospikeClient()
 	if err != nil {
 		t.Fatalf("Unable to reconnect to Aerospike after granting roles: %s", err)
 	}
-	defer (*client).Close()
+	defer client.Close()
 
 	// Clean up any leftover test DCs from previous runs
-	_ = cleanupTestDC(*client, "test-dc")
-	_ = cleanupTestDC(*client, "test-dc-update")
+	_ = cleanupTestDC(client, "test-dc")
+	_ = cleanupTestDC(client, "test-dc-update")
 }
 
 // cleanupTestDC attempts to remove a DC — ignores errors (DC may not exist).
-func cleanupTestDC(conn as.ClientIfc, dc string) error {
+func cleanupTestDC(conn *as.Client, dc string) error {
 	// Try removing namespace, nodes, then DC
 	_, _ = removeXDRDCNamespace(conn, dc, "aerospike")
 	_, _ = removeXDRDCNode(conn, dc, "aerospike-target:3000")
@@ -55,9 +55,9 @@ func testAccCheckXDRDCExists(dc string) resource.TestCheckFunc { //nolint:unpara
 		if err != nil {
 			return err
 		}
-		defer (*client).Close()
+		defer client.Close()
 
-		if !dcExists(*client, dc) {
+		if !dcExists(client, dc) {
 			return fmt.Errorf("DC %q does not exist on the server", dc)
 		}
 		return nil
@@ -70,14 +70,14 @@ func testAccCheckXDRDCDestroy(s *terraform.State) error {
 	if err != nil {
 		return err
 	}
-	defer (*client).Close()
+	defer client.Close()
 
 	for _, rs := range s.RootModule().Resources {
 		if rs.Type != "aerospike_xdr_dc_config" {
 			continue
 		}
 		dc := rs.Primary.Attributes["dc"]
-		if dcExists(*client, dc) {
+		if dcExists(client, dc) {
 			return fmt.Errorf("DC %q still exists after destroy", dc)
 		}
 	}
