@@ -39,6 +39,8 @@ func (r *AerospikeServiceConfig) Schema(ctx context.Context, req resource.Schema
 	resp.Schema = schema.Schema{
 		Description: "Manages dynamic Aerospike service-level configuration parameters. " +
 			"Only one instance of this resource is allowed per provider — the Aerospike service context is a cluster-wide singleton. " +
+			"This resource only manages the parameters explicitly declared in the Terraform configuration — " +
+			"all other server parameters are left untouched and will not cause drift. " +
 			"Parameters are validated against the running server before being applied. " +
 			"On destroy, parameters are NOT reset — they persist on the server until changed manually or the server is restarted.",
 
