@@ -51,7 +51,8 @@ type AerospikeTLSConfigModel struct {
 }
 
 type asConnection struct {
-	client *as.ClientIfc
+	client               *as.ClientIfc
+	serviceConfigClaimed int32 // atomic; enforces singleton aerospike_service_config
 }
 
 func (p *AerospikeProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -205,6 +206,7 @@ func (p *AerospikeProvider) Resources(ctx context.Context) []func() resource.Res
 		NewAerospikeUser,
 		NewAerospikeRole,
 		NewAerospikeNamespaceConfig,
+		NewAerospikeServiceConfig,
 	}
 }
 
