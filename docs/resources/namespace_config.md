@@ -3,12 +3,12 @@
 page_title: "aerospike_namespace_config Resource - terraform-provider-aerospike"
 subcategory: ""
 description: |-
-  Manages dynamic Aerospike namespace and set-level configuration parameters. Parameters are validated against the running server before being applied. On destroy, parameters are NOT reset — they persist on the server until changed manually or the server is restarted.
+  Manages dynamic Aerospike namespace and set-level configuration parameters. This resource only manages the parameters explicitly declared in the Terraform configuration — all other server parameters are left untouched and will not cause drift. Parameters are validated against the running server before being applied. On destroy, parameters are NOT reset — they persist on the server until changed manually or the server is restarted.
 ---
 
 # aerospike_namespace_config (Resource)
 
-Manages dynamic Aerospike namespace and set-level configuration parameters. Parameters are validated against the running server before being applied. On destroy, parameters are NOT reset — they persist on the server until changed manually or the server is restarted.
+Manages dynamic Aerospike namespace and set-level configuration parameters. This resource only manages the parameters explicitly declared in the Terraform configuration — all other server parameters are left untouched and will not cause drift. Parameters are validated against the running server before being applied. On destroy, parameters are NOT reset — they persist on the server until changed manually or the server is restarted.
 
 ## Example Usage
 

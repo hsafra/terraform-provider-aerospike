@@ -3,12 +3,12 @@
 page_title: "aerospike_xdr_dc_config Resource - terraform-provider-aerospike"
 subcategory: ""
 description: |-
-  Manages an Aerospike XDR datacenter configuration. Creates the datacenter, adds nodes and namespaces, and applies dynamic configuration parameters. On destroy, the datacenter is removed from the XDR configuration.
+  Manages an Aerospike XDR datacenter configuration. Creates the datacenter, adds nodes and namespaces, and applies dynamic configuration parameters. This resource only manages the parameters explicitly declared in the Terraform configuration — all other server parameters are left untouched and will not cause drift. On destroy, the datacenter is removed from the XDR configuration.
 ---
 
 # aerospike_xdr_dc_config (Resource)
 
-Manages an Aerospike XDR datacenter configuration. Creates the datacenter, adds nodes and namespaces, and applies dynamic configuration parameters. On destroy, the datacenter is removed from the XDR configuration.
+Manages an Aerospike XDR datacenter configuration. Creates the datacenter, adds nodes and namespaces, and applies dynamic configuration parameters. This resource only manages the parameters explicitly declared in the Terraform configuration — all other server parameters are left untouched and will not cause drift. On destroy, the datacenter is removed from the XDR configuration.
 
 ## Example Usage
 

@@ -58,6 +58,8 @@ func (r *AerospikeXDRDCConfig) Schema(ctx context.Context, req resource.SchemaRe
 	resp.Schema = schema.Schema{
 		Description: "Manages an Aerospike XDR datacenter configuration. " +
 			"Creates the datacenter, adds nodes and namespaces, and applies dynamic configuration parameters. " +
+			"This resource only manages the parameters explicitly declared in the Terraform configuration — " +
+			"all other server parameters are left untouched and will not cause drift. " +
 			"On destroy, the datacenter is removed from the XDR configuration.",
 
 		Attributes: map[string]schema.Attribute{
