@@ -94,6 +94,9 @@ jobs:
         run: |
           AEROSPIKE_VERSION=${{ matrix.aerospike.version }} \
           AEROSPIKE_MAJOR_VERSION=${{ matrix.aerospike.major }} \
+          AEROSPIKE_HOST_PORT=3000 \
+          AEROSPIKE_HOST_PORT_2=3010 \
+          AEROSPIKE_HOST_PORT_3=3020 \
           docker compose up -d --wait
       - name: Run acceptance tests
         env:
@@ -106,4 +109,7 @@ jobs:
         run: |
           AEROSPIKE_VERSION=${{ matrix.aerospike.version }} \
           AEROSPIKE_MAJOR_VERSION=${{ matrix.aerospike.major }} \
+          AEROSPIKE_HOST_PORT=3000 \
+          AEROSPIKE_HOST_PORT_2=3010 \
+          AEROSPIKE_HOST_PORT_3=3020 \
           docker compose down
