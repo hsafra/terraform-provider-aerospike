@@ -808,30 +808,30 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 
 		// Step 1: Remove unwanted sets by moving them to the opposite list.
 		// To remove from shipped-sets, add to ignore-set; to remove from ignored-sets, add to ship-set.
+		// These are internal mechanism commands — not included in info_commands output
+		// because they don't represent the desired config state.
 
 		// Remove old ship-sets not in new ship list
 		for s := range oldShipSets {
 			if !newShipSets[s] {
-				cmd, err := addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
+				_, err := addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
 				if err != nil {
 					diags.AddError("Error removing ship-set",
 						fmt.Sprintf("Failed to move ship-set %q to ignore-set: %s", s, err.Error()))
 					return diags
 				}
-				*infoCommands = append(*infoCommands, cmd)
 			}
 		}
 
 		// Remove old ignore-sets not in new ignore list
 		for s := range oldIgnoreSets {
 			if !newIgnoreSets[s] {
-				cmd, err := addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
+				_, err := addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
 				if err != nil {
 					diags.AddError("Error removing ignore-set",
 						fmt.Sprintf("Failed to move ignore-set %q to ship-set: %s", s, err.Error()))
 					return diags
 				}
-				*infoCommands = append(*infoCommands, cmd)
 			}
 		}
 
@@ -866,21 +866,18 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 		}
 		*infoCommands = append(*infoCommands, cmd)
 
-		// Move all old ship-sets to ignore-set to clear them, then back
+		// Move all old ship-sets to ignore-set to clear them, then back.
+		// These are internal cleanup commands — not included in info_commands.
 		oldShipSets := extractOldSets(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.ShipSets })
 		for s := range oldShipSets {
-			cmd, _ := addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
-			*infoCommands = append(*infoCommands, cmd)
-			cmd, _ = addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
-			*infoCommands = append(*infoCommands, cmd)
+			addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s) //nolint:errcheck // best-effort cleanup
+			addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)   //nolint:errcheck // best-effort cleanup
 		}
 		// Move all old ignore-sets to ship-set to clear them, then back
 		oldIgnoreSets := extractOldSets(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.IgnoreSets })
 		for s := range oldIgnoreSets {
-			cmd, _ := addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)
-			*infoCommands = append(*infoCommands, cmd)
-			cmd, _ = addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s)
-			*infoCommands = append(*infoCommands, cmd)
+			addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)   //nolint:errcheck // best-effort cleanup
+			addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s) //nolint:errcheck // best-effort cleanup
 		}
 	}
 
