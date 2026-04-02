@@ -51,3 +51,13 @@ Optional:
 
 - `namespace` (String) Namespace. Optional - if nulll the privilege will apply to all namespaces. must not be an empty string
 - `set` (String) Set. Optional - if null the privilege will apply to all sets. Must be used with namespace. Must not be an emptry string
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import aerospike_role.example myrole
+```

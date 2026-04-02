@@ -31,3 +31,13 @@ resource "aerospike_user" "test2" {
 ### Optional
 
 - `roles` (List of String) Roles that should be granted to the user
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import aerospike_user.example myuser
+```

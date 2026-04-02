@@ -1,0 +1,1 @@
+terraform import aerospike_namespace_config.example test
