@@ -60,6 +60,40 @@ func sendInfoCommandAllNodes(conn *as.Client, command string) (map[string]string
 	return lastResult, nil
 }
 
+// smdRaceError is the error Aerospike returns when a structural XDR command
+// (create/delete DC, add/remove node/namespace) races with SMD propagation.
+// For example, node 1 creates a DC and SMD propagates it to node 2 before our
+// explicit command reaches node 2 → node 2 returns this error.
+const smdRaceError = "ERROR:4:invalid state or set-config parameter"
+
+// sendInfoCommandAllNodesSMD sends an asinfo command to ALL nodes, tolerating
+// SMD propagation race errors on non-first nodes. Use this for structural XDR
+// commands (create/delete DC, add/remove node/namespace) that are automatically
+// distributed via SMD. The first node must succeed; subsequent nodes may fail
+// with the expected SMD race error which is silently ignored.
+func sendInfoCommandAllNodesSMD(conn *as.Client, command string) (map[string]string, error) { //nolint:unparam // callers may use the result in the future
+	nodes := conn.GetNodes()
+	if len(nodes) == 0 {
+		return nil, errors.New("no nodes available in cluster")
+	}
+
+	// First node must succeed
+	result, err := sendInfoToNode(nodes[0], command)
+	if err != nil {
+		return nil, fmt.Errorf("node %s: %w", nodes[0].GetName(), err)
+	}
+
+	// Remaining nodes: tolerate the specific SMD race error, fail on anything else
+	for _, node := range nodes[1:] {
+		_, nodeErr := sendInfoToNode(node, command)
+		if nodeErr != nil && !strings.Contains(nodeErr.Error(), smdRaceError) {
+			return nil, fmt.Errorf("node %s: %w", node.GetName(), nodeErr)
+		}
+	}
+
+	return result, nil
+}
+
 // sendInfoToNode sends an asinfo command to a specific node and checks for errors.
 func sendInfoToNode(node *as.Node, command string) (map[string]string, error) {
 	policy := as.NewInfoPolicy()
@@ -256,10 +290,9 @@ func dcExists(conn *as.Client, dc string) bool {
 }
 
 // createXDRDC creates a new datacenter in the XDR configuration.
-// Structural XDR changes propagate via SMD, but we send to all nodes for consistency with asadm.
 func createXDRDC(conn *as.Client, dc string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";action=create"
-	_, err := sendInfoCommandAllNodes(conn, command)
+	_, err := sendInfoCommandAllNodesSMD(conn, command)
 	return command, err
 }
 
@@ -271,7 +304,7 @@ func removeXDRDC(conn *as.Client, dc string) error {
 	command := "set-config:context=xdr;dc=" + dc + ";action=delete"
 	var err error
 	for attempt := 0; attempt < 5; attempt++ {
-		_, err = sendInfoCommandAllNodes(conn, command)
+		_, err = sendInfoCommandAllNodesSMD(conn, command)
 		if err == nil {
 			return nil
 		}
@@ -283,14 +316,14 @@ func removeXDRDC(conn *as.Client, dc string) error {
 // addXDRDCNode adds a node-address-port to a datacenter.
 func addXDRDCNode(conn *as.Client, dc, addrPort string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";node-address-port=" + addrPort + ";action=add"
-	_, err := sendInfoCommandAllNodes(conn, command)
+	_, err := sendInfoCommandAllNodesSMD(conn, command)
 	return command, err
 }
 
 // removeXDRDCNode removes a node-address-port from a datacenter.
 func removeXDRDCNode(conn *as.Client, dc, addrPort string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";node-address-port=" + addrPort + ";action=remove"
-	_, err := sendInfoCommandAllNodes(conn, command)
+	_, err := sendInfoCommandAllNodesSMD(conn, command)
 	return command, err
 }
 
@@ -301,14 +334,14 @@ func addXDRDCNamespace(conn *as.Client, dc, namespace, rewind string) (string, e
 	if rewind != "" {
 		command += ";rewind=" + rewind
 	}
-	_, err := sendInfoCommandAllNodes(conn, command)
+	_, err := sendInfoCommandAllNodesSMD(conn, command)
 	return command, err
 }
 
 // removeXDRDCNamespace removes a namespace from a datacenter.
 func removeXDRDCNamespace(conn *as.Client, dc, namespace string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";namespace=" + namespace + ";action=remove"
-	_, err := sendInfoCommandAllNodes(conn, command)
+	_, err := sendInfoCommandAllNodesSMD(conn, command)
 	return command, err
 }
 
