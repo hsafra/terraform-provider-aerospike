@@ -53,3 +53,13 @@ output "applied_commands" {
 ### Read-Only
 
 - `info_commands` (List of String) Output-only list of all asinfo commands executed during the last create or update. Useful for persisting as commands to run when provisioning new servers.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import aerospike_namespace_config.example test
+```

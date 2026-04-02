@@ -99,3 +99,13 @@ Optional:
 
 - `ignore_sets` (Set of String) Sets to ignore. Only valid when ship_only_specified_sets is false.
 - `ship_sets` (Set of String) Sets to ship. Only valid when ship_only_specified_sets is true.
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import aerospike_xdr_dc_config.example dc1
+```

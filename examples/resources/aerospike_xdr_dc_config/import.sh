@@ -1,0 +1,1 @@
+terraform import aerospike_xdr_dc_config.example dc1
