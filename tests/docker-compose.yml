@@ -1,18 +1,53 @@
 services:
-  aerospike-source:
+  aerospike-source-1:
     image: aerospike:ee-${AEROSPIKE_VERSION}
     volumes:
       - .:/opt/aerospike/etc/
     environment:
       - FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf
+      - AEROSPIKE_MAJOR_VERSION=${AEROSPIKE_MAJOR_VERSION}
+      - MESH_SEED_HOST=aerospike-source-1
+      - ALT_ACCESS_PORT=${AEROSPIKE_HOST_PORT:-3000}
+    entrypoint: ["/opt/aerospike/etc/cluster-entrypoint.sh"]
     ports:
       - "${AEROSPIKE_HOST_PORT:-3000}:3000"
-    command: --config-file /opt/aerospike/etc/aerospike-ee-${AEROSPIKE_MAJOR_VERSION}-source.conf
     depends_on:
-      aerospike-target:
+      aerospike-target-1:
         condition: service_started
 
-  aerospike-target:
+  aerospike-source-2:
+    image: aerospike:ee-${AEROSPIKE_VERSION}
+    volumes:
+      - .:/opt/aerospike/etc/
+    environment:
+      - FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf
+      - AEROSPIKE_MAJOR_VERSION=${AEROSPIKE_MAJOR_VERSION}
+      - MESH_SEED_HOST=aerospike-source-1
+      - ALT_ACCESS_PORT=${AEROSPIKE_HOST_PORT_2}
+    entrypoint: ["/opt/aerospike/etc/cluster-entrypoint.sh"]
+    ports:
+      - "${AEROSPIKE_HOST_PORT_2}:3000"
+    depends_on:
+      aerospike-source-1:
+        condition: service_started
+
+  aerospike-source-3:
+    image: aerospike:ee-${AEROSPIKE_VERSION}
+    volumes:
+      - .:/opt/aerospike/etc/
+    environment:
+      - FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf
+      - AEROSPIKE_MAJOR_VERSION=${AEROSPIKE_MAJOR_VERSION}
+      - MESH_SEED_HOST=aerospike-source-1
+      - ALT_ACCESS_PORT=${AEROSPIKE_HOST_PORT_3}
+    entrypoint: ["/opt/aerospike/etc/cluster-entrypoint.sh"]
+    ports:
+      - "${AEROSPIKE_HOST_PORT_3}:3000"
+    depends_on:
+      aerospike-source-1:
+        condition: service_started
+
+  aerospike-target-1:
     image: aerospike:ee-${AEROSPIKE_VERSION}
     volumes:
       - .:/opt/aerospike/etc/
@@ -20,7 +55,7 @@ services:
       - FEATURE_KEY_FILE=/opt/aerospike/etc/features.conf
     command: --config-file /opt/aerospike/etc/aerospike-ee-${AEROSPIKE_MAJOR_VERSION}-target.conf
 
-  aerospike-target2:
+  aerospike-target-2:
     image: aerospike:ee-${AEROSPIKE_VERSION}
     volumes:
       - .:/opt/aerospike/etc/

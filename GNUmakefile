@@ -18,15 +18,23 @@ testacc:
 	TF_ACC=1 go test ./... -v -cover -count=1 -p 1 $(TESTARGS) -timeout 120m
 
 # Run acceptance tests against a specific Aerospike version using docker compose.
+# Each version starts a 3-node source cluster + 2 target nodes.
 # Usage: make localtestacc-6  or  make localtestacc-7  or  make localtestacc-8
-# $(1) = full version, $(2) = major version, $(3) = host port (default 3000)
+# $(1) = full version, $(2) = major version, $(3) = base host port
+# Source nodes use ports: $(3), $(3)+10, $(3)+20
 define run_local_test
-	AEROSPIKE_VERSION=$(1) AEROSPIKE_MAJOR_VERSION=$(2) AEROSPIKE_HOST_PORT=$(3) \
+	AEROSPIKE_VERSION=$(1) AEROSPIKE_MAJOR_VERSION=$(2) \
+		AEROSPIKE_HOST_PORT=$(3) \
+		AEROSPIKE_HOST_PORT_2=$$(($(3)+10)) \
+		AEROSPIKE_HOST_PORT_3=$$(($(3)+20)) \
 		COMPOSE_PROJECT_NAME=aerospike-test-v$(2) \
 		docker compose -f tests/docker-compose.yml up -d --wait
 	AEROSPIKE_PORT=$(3) TF_ACC=1 go test ./... -v -cover -count=1 -p 1 $(TESTARGS) -timeout 120m; \
 	ret=$$?; \
-	AEROSPIKE_VERSION=$(1) AEROSPIKE_MAJOR_VERSION=$(2) AEROSPIKE_HOST_PORT=$(3) \
+	AEROSPIKE_VERSION=$(1) AEROSPIKE_MAJOR_VERSION=$(2) \
+		AEROSPIKE_HOST_PORT=$(3) \
+		AEROSPIKE_HOST_PORT_2=$$(($(3)+10)) \
+		AEROSPIKE_HOST_PORT_3=$$(($(3)+20)) \
 		COMPOSE_PROJECT_NAME=aerospike-test-v$(2) \
 		docker compose -f tests/docker-compose.yml down; \
 	exit $$ret
@@ -48,10 +56,11 @@ localtestacc-8:
 .PHONY: localtestacc
 localtestacc: localtestacc-6 localtestacc-7 localtestacc-8
 
-# Run all versions in parallel — each version gets its own port and compose project
+# Run all versions in parallel — each version gets its own port range and compose project
+# v6: 3100-3120, v7: 3200-3220, v8: 3300-3320
 .PHONY: localtestacc-parallel
 localtestacc-parallel:
-	@echo "Starting parallel tests for v6 (port 3100), v7 (port 3200), v8 (port 3300)..."
+	@echo "Starting parallel tests for v6 (ports 3100-3120), v7 (ports 3200-3220), v8 (ports 3300-3320)..."
 	@mkdir -p /tmp/localtestacc-results
 	@$(MAKE) _parallel-v6 _parallel-v7 _parallel-v8 -j3
 	@echo ""; echo "=== Parallel Test Summary ==="

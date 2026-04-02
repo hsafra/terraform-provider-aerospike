@@ -40,6 +40,7 @@ func testAccGetAerospikeClient() (*as.Client, error) {
 	cp := as.NewClientPolicy()
 	cp.User = user
 	cp.Password = password
+	cp.UseServicesAlternate = true
 
 	client, err := as.NewClientWithPolicyAndHost(cp, as.NewHost(host, int(port)))
 	if err != nil {
