@@ -1,3 +1,16 @@
+## 0.5.2
+BUG FIXES:
+* Fix set-config commands only reaching a single cluster node — all write commands now fan out to every node, matching asadm behavior
+* Fix `ignore_sets`/`ship_sets` removal not detected by plan when server state drifts across nodes
+* Exclude internal set-removal mechanism commands (move-to-opposite-list) from `info_commands` output
+
+ENHANCEMENTS:
+* Import documentation auto-generated via tfplugindocs for all resources
+* Multi-node (3-node) source cluster test infrastructure for all Aerospike versions
+* Multi-node verification tests confirming config consistency across all cluster nodes
+* `UseServicesAlternate` enabled on client for Docker/NAT compatibility
+* CI workflow updated to run tests against 3-node clusters
+
 ## 0.5.0
 FEATURES:
 * New `aerospike_service_config` resource for managing dynamic service-level configuration parameters
