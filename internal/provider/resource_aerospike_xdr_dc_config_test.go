@@ -1,5 +1,6 @@
 // Copyright (c) Harel Safra
 // SPDX-License-Identifier: MPL-2.0
+// CI stability verification
 
 package provider
 
