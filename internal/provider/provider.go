@@ -129,6 +129,7 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 	cp := as.NewClientPolicy()
 	cp.User = user
 	cp.Password = password
+	cp.UseServicesAlternate = true
 	if connectTimeout != 0 {
 		cp.Timeout = time.Second * time.Duration(connectTimeout)
 	}

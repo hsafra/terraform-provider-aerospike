@@ -5,6 +5,7 @@ package provider
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -27,13 +28,40 @@ func namespaceExists(conn *as.Client, namespace string) bool {
 }
 
 // sendInfoCommand sends an asinfo command to a random node in the cluster and returns the response.
-// It checks the response for ERROR strings and returns an error if found.
+// Use this for read-only commands (get-config, etc.) where a single node's response is sufficient.
 func sendInfoCommand(conn *as.Client, command string) (map[string]string, error) {
 	node, err := conn.Cluster().GetRandomNode()
 	if err != nil {
 		return nil, err
 	}
 
+	return sendInfoToNode(node, command)
+}
+
+// sendInfoCommandAllNodes sends an asinfo command to ALL nodes in the cluster.
+// Use this for write commands (set-config, etc.) because Aerospike set-config commands
+// are per-node — they are NOT automatically distributed via SMD to other cluster members.
+// This follows the same approach as asadm, which fans out config commands to every node.
+func sendInfoCommandAllNodes(conn *as.Client, command string) (map[string]string, error) { //nolint:unparam // callers may use the result in the future
+	nodes := conn.GetNodes()
+	if len(nodes) == 0 {
+		return nil, errors.New("no nodes available in cluster")
+	}
+
+	var lastResult map[string]string
+	for _, node := range nodes {
+		result, err := sendInfoToNode(node, command)
+		if err != nil {
+			return nil, fmt.Errorf("node %s: %w", node.GetName(), err)
+		}
+		lastResult = result
+	}
+
+	return lastResult, nil
+}
+
+// sendInfoToNode sends an asinfo command to a specific node and checks for errors.
+func sendInfoToNode(node *as.Node, command string) (map[string]string, error) {
 	policy := as.NewInfoPolicy()
 	result, err := node.RequestInfo(policy, command)
 	if err != nil {
@@ -143,14 +171,14 @@ func getValidSetParamKeys(conn *as.Client, namespace, setName string) (map[strin
 // setNamespaceParam sets a single namespace-level configuration parameter via set-config.
 func setNamespaceParam(conn *as.Client, namespace, key, value string) (string, error) {
 	command := "set-config:context=namespace;id=" + namespace + ";" + key + "=" + value
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
 // setNamespaceSetParam sets a single set-level configuration parameter within a namespace.
 func setNamespaceSetParam(conn *as.Client, namespace, setName, key, value string) (string, error) {
 	command := "set-config:context=namespace;id=" + namespace + ";set=" + setName + ";" + key + "=" + value
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
@@ -177,7 +205,7 @@ func getServiceConfig(conn *as.Client) (map[string]string, error) {
 // setServiceParam sets a single service-level configuration parameter via set-config.
 func setServiceParam(conn *as.Client, key, value string) (string, error) {
 	command := "set-config:context=service;" + key + "=" + value
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
@@ -228,9 +256,10 @@ func dcExists(conn *as.Client, dc string) bool {
 }
 
 // createXDRDC creates a new datacenter in the XDR configuration.
+// Structural XDR changes propagate via SMD, but we send to all nodes for consistency with asadm.
 func createXDRDC(conn *as.Client, dc string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";action=create"
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
@@ -242,7 +271,7 @@ func removeXDRDC(conn *as.Client, dc string) error {
 	command := "set-config:context=xdr;dc=" + dc + ";action=delete"
 	var err error
 	for attempt := 0; attempt < 5; attempt++ {
-		_, err = sendInfoCommand(conn, command)
+		_, err = sendInfoCommandAllNodes(conn, command)
 		if err == nil {
 			return nil
 		}
@@ -254,14 +283,14 @@ func removeXDRDC(conn *as.Client, dc string) error {
 // addXDRDCNode adds a node-address-port to a datacenter.
 func addXDRDCNode(conn *as.Client, dc, addrPort string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";node-address-port=" + addrPort + ";action=add"
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
 // removeXDRDCNode removes a node-address-port from a datacenter.
 func removeXDRDCNode(conn *as.Client, dc, addrPort string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";node-address-port=" + addrPort + ";action=remove"
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
@@ -272,41 +301,41 @@ func addXDRDCNamespace(conn *as.Client, dc, namespace, rewind string) (string, e
 	if rewind != "" {
 		command += ";rewind=" + rewind
 	}
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
 // removeXDRDCNamespace removes a namespace from a datacenter.
 func removeXDRDCNamespace(conn *as.Client, dc, namespace string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";namespace=" + namespace + ";action=remove"
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
 // setXDRDCParam sets a DC-level XDR configuration parameter.
 func setXDRDCParam(conn *as.Client, dc, key, value string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";" + key + "=" + value
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
 // setXDRDCNamespaceParam sets a namespace-level XDR configuration parameter within a DC.
 func setXDRDCNamespaceParam(conn *as.Client, dc, namespace, key, value string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";namespace=" + namespace + ";" + key + "=" + value
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
 // addXDRDCNamespaceShipSet adds a single ship-set to a namespace within a DC.
 func addXDRDCNamespaceShipSet(conn *as.Client, dc, namespace, setName string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";namespace=" + namespace + ";ship-set=" + setName
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
 // addXDRDCNamespaceIgnoreSet adds a single ignore-set to a namespace within a DC.
 func addXDRDCNamespaceIgnoreSet(conn *as.Client, dc, namespace, setName string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";namespace=" + namespace + ";ignore-set=" + setName
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }

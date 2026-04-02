@@ -6,10 +6,8 @@ package provider
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -304,49 +302,12 @@ func (r *AerospikeXDRDCConfig) Read(ctx context.Context, req resource.ReadReques
 				policy.ShipOnlySpecifiedSets = types.BoolValue(sosVal == "true")
 			}
 
-			// Read shipped-sets from server, filtered to only user-declared sets.
-			// The server may contain extra sets from the move-to-opposite-list mechanism
-			// used to remove sets; we only report the ones the user manages.
-			if !policy.ShipSets.IsNull() {
-				declared := toStringSet(extractStringSlice(policy.ShipSets))
-				if val, ok := serverNsConfig["shipped-sets"]; ok && val != "" {
-					var filtered []string
-					for _, s := range splitAndTrim(val) {
-						if declared[s] {
-							filtered = append(filtered, s)
-						}
-					}
-					setVal, diags := types.SetValueFrom(ctx, types.StringType, filtered)
-					resp.Diagnostics.Append(diags...)
-					if resp.Diagnostics.HasError() {
-						return
-					}
-					policy.ShipSets = setVal
-				} else {
-					policy.ShipSets = types.SetValueMust(types.StringType, []attr.Value{})
-				}
-			}
-
-			// Read ignored-sets from server, filtered to only user-declared sets.
-			if !policy.IgnoreSets.IsNull() {
-				declared := toStringSet(extractStringSlice(policy.IgnoreSets))
-				if val, ok := serverNsConfig["ignored-sets"]; ok && val != "" {
-					var filtered []string
-					for _, s := range splitAndTrim(val) {
-						if declared[s] {
-							filtered = append(filtered, s)
-						}
-					}
-					setVal, diags := types.SetValueFrom(ctx, types.StringType, filtered)
-					resp.Diagnostics.Append(diags...)
-					if resp.Diagnostics.HasError() {
-						return
-					}
-					policy.IgnoreSets = setVal
-				} else {
-					policy.IgnoreSets = types.SetValueMust(types.StringType, []attr.Value{})
-				}
-			}
+			// Preserve ship_sets and ignore_sets from state unchanged.
+			// These are declarative — they represent what the user intends to manage,
+			// not what the server currently has. The server's lists may diverge from
+			// state due to multi-node inconsistency, restarts, or the move-to-opposite-list
+			// removal mechanism. Filtering against the server would silently drop sets
+			// from state, hiding removals from plan and preventing the diff from firing.
 
 			data.Namespaces[i].SetPolicy[0] = policy
 		}
@@ -949,19 +910,6 @@ func toStringSet(ss []string) map[string]bool {
 	result := make(map[string]bool, len(ss))
 	for _, s := range ss {
 		result[s] = true
-	}
-	return result
-}
-
-// splitAndTrim splits a comma-separated string and trims whitespace from each element.
-func splitAndTrim(s string) []string {
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
-		}
 	}
 	return result
 }
