@@ -256,10 +256,10 @@ func dcExists(conn *as.Client, dc string) bool {
 }
 
 // createXDRDC creates a new datacenter in the XDR configuration.
-// Structural XDR changes propagate via SMD — single node is sufficient.
+// Structural XDR changes propagate via SMD, but we send to all nodes for consistency with asadm.
 func createXDRDC(conn *as.Client, dc string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";action=create"
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
@@ -271,7 +271,7 @@ func removeXDRDC(conn *as.Client, dc string) error {
 	command := "set-config:context=xdr;dc=" + dc + ";action=delete"
 	var err error
 	for attempt := 0; attempt < 5; attempt++ {
-		_, err = sendInfoCommand(conn, command)
+		_, err = sendInfoCommandAllNodes(conn, command)
 		if err == nil {
 			return nil
 		}
@@ -281,38 +281,34 @@ func removeXDRDC(conn *as.Client, dc string) error {
 }
 
 // addXDRDCNode adds a node-address-port to a datacenter.
-// Structural XDR changes propagate via SMD — single node is sufficient.
 func addXDRDCNode(conn *as.Client, dc, addrPort string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";node-address-port=" + addrPort + ";action=add"
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
 // removeXDRDCNode removes a node-address-port from a datacenter.
-// Structural XDR changes propagate via SMD — single node is sufficient.
 func removeXDRDCNode(conn *as.Client, dc, addrPort string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";node-address-port=" + addrPort + ";action=remove"
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
 // addXDRDCNamespace adds a namespace to a datacenter, optionally with a rewind value.
 // rewind can be "" (no rewind), "all", or a number of seconds.
-// Structural XDR changes propagate via SMD — single node is sufficient.
 func addXDRDCNamespace(conn *as.Client, dc, namespace, rewind string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";namespace=" + namespace + ";action=add"
 	if rewind != "" {
 		command += ";rewind=" + rewind
 	}
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
 // removeXDRDCNamespace removes a namespace from a datacenter.
-// Structural XDR changes propagate via SMD — single node is sufficient.
 func removeXDRDCNamespace(conn *as.Client, dc, namespace string) (string, error) {
 	command := "set-config:context=xdr;dc=" + dc + ";namespace=" + namespace + ";action=remove"
-	_, err := sendInfoCommand(conn, command)
+	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
 
