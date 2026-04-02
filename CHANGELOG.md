@@ -3,6 +3,7 @@ BUG FIXES:
 * Fix set-config commands only reaching a single cluster node — all write commands now fan out to every node, matching asadm behavior
 * Fix `ignore_sets`/`ship_sets` removal not detected by plan when server state drifts across nodes
 * Exclude internal set-removal mechanism commands (move-to-opposite-list) from `info_commands` output
+* Tolerate SMD propagation race errors for structural XDR commands (create/delete DC, add/remove node/namespace) in multi-node clusters
 
 ENHANCEMENTS:
 * Import documentation auto-generated via tfplugindocs for all resources
