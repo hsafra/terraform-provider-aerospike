@@ -1,3 +1,7 @@
+## 0.5.3
+BUG FIXES:
+* Strip `storage-engine.` subcontext prefix from namespace parameters in `set-config` commands — Aerospike's `get-config` returns these params with the prefix but `set-config` rejects it
+
 ## 0.5.2
 BUG FIXES:
 * Fix set-config commands only reaching a single cluster node — all write commands now fan out to every node, matching asadm behavior
