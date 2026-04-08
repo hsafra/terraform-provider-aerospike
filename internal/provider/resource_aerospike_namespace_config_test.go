@@ -521,3 +521,74 @@ resource "aerospike_namespace_config" "test" {
   }
 }`
 }
+
+// Test that storage-engine subcontext params can be set and read back.
+// Aerospike get-config returns these with the "storage-engine." prefix, but
+// set-config requires the prefix to be stripped.
+func TestAccAerospikeNamespaceConfig_storageEngineParam(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccNamespaceConfigWithStorageEngineParam("80"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.storage-engine.defrag-lwm-pct", "80"),
+					testAccCheckNamespaceParam("aerospike", "storage-engine.defrag-lwm-pct", "80"),
+				),
+			},
+			// Update the value
+			{
+				Config: testAccNamespaceConfigWithStorageEngineParam("75"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.storage-engine.defrag-lwm-pct", "75"),
+					testAccCheckNamespaceParam("aerospike", "storage-engine.defrag-lwm-pct", "75"),
+				),
+			},
+		},
+	})
+}
+
+// Test mixing regular params with storage-engine subcontext params.
+func TestAccAerospikeNamespaceConfig_mixedSubcontextAndRegularParams(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccNamespaceConfigMixedSubcontextParams(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "500"),
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.storage-engine.defrag-lwm-pct", "70"),
+					testAccCheckNamespaceParam("aerospike", "default-ttl", "500"),
+					testAccCheckNamespaceParam("aerospike", "storage-engine.defrag-lwm-pct", "70"),
+				),
+			},
+		},
+	})
+}
+
+func testAccNamespaceConfigWithStorageEngineParam(defragLwmPct string) string {
+	return fmt.Sprintf(`
+resource "aerospike_namespace_config" "test" {
+  namespace = "aerospike"
+
+  params = {
+    "storage-engine.defrag-lwm-pct" = "%s"
+  }
+}`, defragLwmPct)
+}
+
+func testAccNamespaceConfigMixedSubcontextParams() string {
+	return `
+resource "aerospike_namespace_config" "test" {
+  namespace = "aerospike"
+
+  params = {
+    "default-ttl"                   = "500"
+    "storage-engine.defrag-lwm-pct" = "70"
+  }
+}`
+}

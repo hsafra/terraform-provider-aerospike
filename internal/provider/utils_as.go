@@ -202,9 +202,28 @@ func getValidSetParamKeys(conn *as.Client, namespace, setName string) (map[strin
 	return keys, nil
 }
 
+// namespaceSubcontextPrefix is the prefix Aerospike's get-config uses for
+// storage-engine parameters (e.g. "storage-engine.defrag-lwm-pct"). The
+// set-config command requires this prefix to be stripped — only the bare
+// parameter name is accepted (e.g. "defrag-lwm-pct").
+// See https://aerospike.com/docs/database/tools/runtime-config/
+const namespaceSubcontextPrefix = "storage-engine."
+
+// stripNamespaceSubcontext removes the storage-engine subcontext prefix from a
+// namespace parameter key so it can be used in a set-config command.
+func stripNamespaceSubcontext(key string) string {
+	if strings.HasPrefix(key, namespaceSubcontextPrefix) {
+		return strings.TrimPrefix(key, namespaceSubcontextPrefix)
+	}
+	return key
+}
+
 // setNamespaceParam sets a single namespace-level configuration parameter via set-config.
+// Parameters with the "storage-engine." prefix are automatically stripped because
+// Aerospike's set-config does not accept the subcontext prefix.
 func setNamespaceParam(conn *as.Client, namespace, key, value string) (string, error) {
-	command := "set-config:context=namespace;id=" + namespace + ";" + key + "=" + value
+	setKey := stripNamespaceSubcontext(key)
+	command := "set-config:context=namespace;id=" + namespace + ";" + setKey + "=" + value
 	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
