@@ -870,14 +870,14 @@ func (r *AerospikeXDRDCConfig) diffSetPolicy(_ context.Context, dc, namespace st
 		// These are internal cleanup commands — not included in info_commands.
 		oldShipSets := extractOldSets(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.ShipSets })
 		for s := range oldShipSets {
-			addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s) //nolint:errcheck // best-effort cleanup
-			addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)   //nolint:errcheck // best-effort cleanup
+			addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s) //nolint:errcheck,gosec // best-effort cleanup
+			addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)   //nolint:errcheck,gosec // best-effort cleanup
 		}
 		// Move all old ignore-sets to ship-set to clear them, then back
 		oldIgnoreSets := extractOldSets(oldPolicy, func(p XDRSetPolicyModel) types.Set { return p.IgnoreSets })
 		for s := range oldIgnoreSets {
-			addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)   //nolint:errcheck // best-effort cleanup
-			addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s) //nolint:errcheck // best-effort cleanup
+			addXDRDCNamespaceShipSet(r.asConn.client, dc, namespace, s)   //nolint:errcheck,gosec // best-effort cleanup
+			addXDRDCNamespaceIgnoreSet(r.asConn.client, dc, namespace, s) //nolint:errcheck,gosec // best-effort cleanup
 		}
 	}
 

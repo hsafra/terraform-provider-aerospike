@@ -854,7 +854,7 @@ func testAccCheckAllNodesXDRNamespaceParam(dc, namespace, key string, expected [
 		for _, node := range nodes {
 			result, err := sendInfoToNode(node, command)
 			if err != nil {
-				return fmt.Errorf("node %s: failed to get XDR namespace config: %s", node.GetName(), err)
+				return fmt.Errorf("node %s: failed to get XDR namespace config: %w", node.GetName(), err)
 			}
 
 			config := make(map[string]string)
@@ -889,7 +889,7 @@ func testAccCheckAllNodesServiceParam(key, expected string) resource.TestCheckFu
 		for _, node := range nodes {
 			result, err := sendInfoToNode(node, command)
 			if err != nil {
-				return fmt.Errorf("node %s: failed to get service config: %s", node.GetName(), err)
+				return fmt.Errorf("node %s: failed to get service config: %w", node.GetName(), err)
 			}
 
 			raw := result[command]
@@ -925,7 +925,7 @@ func testAccCheckXDRDCNamespaceIgnoreSets(dc, namespace string, expected []strin
 
 		config, err := getXDRDCNamespaceConfig(client, dc, namespace)
 		if err != nil {
-			return fmt.Errorf("failed to get XDR DC namespace config: %s", err)
+			return fmt.Errorf("failed to get XDR DC namespace config: %w", err)
 		}
 
 		return compareStringSet(config["ignored-sets"], expected, "ignore-sets")
@@ -943,7 +943,7 @@ func testAccCheckXDRDCNamespaceShipSets(expected []string) resource.TestCheckFun
 
 		config, err := getXDRDCNamespaceConfig(client, "test-dc", "aerospike")
 		if err != nil {
-			return fmt.Errorf("failed to get XDR DC namespace config: %s", err)
+			return fmt.Errorf("failed to get XDR DC namespace config: %w", err)
 		}
 
 		actual := config["shipped-sets"]
@@ -962,7 +962,7 @@ func testAccCheckXDRDCParam(dc, key, expected string) resource.TestCheckFunc {
 
 		config, err := getXDRDCConfig(client, dc)
 		if err != nil {
-			return fmt.Errorf("failed to get XDR DC config: %s", err)
+			return fmt.Errorf("failed to get XDR DC config: %w", err)
 		}
 
 		actual, ok := config[key]
@@ -987,7 +987,7 @@ func testAccCheckXDRDCNamespaceParam(key, expected string) resource.TestCheckFun
 
 		config, err := getXDRDCNamespaceConfig(client, "test-dc", "aerospike")
 		if err != nil {
-			return fmt.Errorf("failed to get XDR DC namespace config: %s", err)
+			return fmt.Errorf("failed to get XDR DC namespace config: %w", err)
 		}
 
 		actual, ok := config[key]

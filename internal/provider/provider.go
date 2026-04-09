@@ -8,6 +8,11 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
+	"io"
+	"os"
+	"time"
+
 	as "github.com/aerospike/aerospike-client-go/v8"
 	astypes "github.com/aerospike/aerospike-client-go/v8/types"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
@@ -19,9 +24,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
-	"io"
-	"os"
-	"time"
 )
 
 // Ensure AerospikeProvider satisfies various provider interfaces.
@@ -134,7 +136,7 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 		cp.Timeout = time.Second * time.Duration(connectTimeout)
 	}
 
-	//TLS
+	// TLS
 	var tlsEnabled bool
 	var tlsConfig tls.Config
 
@@ -144,7 +146,7 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 		tlsEnabled = true
 		data.TLS.As(ctx, &dataTLS, basetypes.ObjectAsOptions{})
 
-		//read the root ca if supplied
+		// read the root ca if supplied
 		if !dataTLS.RootCAFile.IsNull() {
 			file, err := os.Open(dataTLS.RootCAFile.ValueString())
 			if err != nil {
@@ -163,7 +165,7 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 			// Read the file into a byte slice
 			bs := make([]byte, stat.Size())
 			_, err = bufio.NewReader(file).Read(bs)
-			if err != nil && err != io.EOF {
+			if err != nil && !errors.Is(err, io.EOF) {
 				resp.Diagnostics.Append(diag.NewErrorDiagnostic("Error reading root ca file", err.Error()))
 				return
 			}

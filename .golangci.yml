@@ -28,6 +28,10 @@ linters:
     - unparam
     - unused
     - govet
+    - gosec
+    - errorlint
+    - bodyclose
+    - gocritic
 
 formatters:
   enable:

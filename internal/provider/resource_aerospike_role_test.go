@@ -33,7 +33,7 @@ func testAccCheckAerospikeRoleDestroy(s *terraform.State) error {
 			return fmt.Errorf("aerospike role %s still exists", rs.Primary.Attributes["role_name"])
 		}
 		if !queryErr.Matches(astypes.INVALID_ROLE) {
-			return fmt.Errorf("unexpected error checking role %s: %s", rs.Primary.Attributes["role_name"], queryErr)
+			return fmt.Errorf("unexpected error checking role %s: %w", rs.Primary.Attributes["role_name"], queryErr)
 		}
 	}
 	return nil
@@ -440,7 +440,7 @@ func testAccCheckRoleExists(roleName string) resource.TestCheckFunc {
 		adminPol := as.NewAdminPolicy()
 		_, queryErr := client.QueryRole(adminPol, roleName)
 		if queryErr != nil {
-			return fmt.Errorf("role %s does not exist: %s", roleName, queryErr)
+			return fmt.Errorf("role %s does not exist: %w", roleName, queryErr)
 		}
 		return nil
 	}
@@ -461,7 +461,7 @@ func testAccCheckRoleNotExists(roleName string) resource.TestCheckFunc {
 			return fmt.Errorf("role %s still exists, expected it to be deleted", roleName)
 		}
 		if !queryErr.Matches(astypes.INVALID_ROLE) {
-			return fmt.Errorf("unexpected error checking role %s: %s", roleName, queryErr)
+			return fmt.Errorf("unexpected error checking role %s: %w", roleName, queryErr)
 		}
 		return nil
 	}
