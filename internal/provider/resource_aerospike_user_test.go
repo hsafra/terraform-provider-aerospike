@@ -32,7 +32,7 @@ func testAccCheckAerospikeUserDestroy(s *terraform.State) error {
 			return fmt.Errorf("aerospike user %s still exists", rs.Primary.Attributes["user_name"])
 		}
 		if !queryErr.Matches(astypes.INVALID_USER) {
-			return fmt.Errorf("unexpected error checking user %s: %s", rs.Primary.Attributes["user_name"], queryErr)
+			return fmt.Errorf("unexpected error checking user %s: %w", rs.Primary.Attributes["user_name"], queryErr)
 		}
 	}
 	return nil
@@ -173,7 +173,7 @@ func testAccCheckUserHasRoles(userName string, expectedRoles []string) resource.
 		adminPol := as.NewAdminPolicy()
 		user, queryErr := client.QueryUser(adminPol, userName)
 		if queryErr != nil {
-			return fmt.Errorf("failed to query user %s: %s", userName, queryErr)
+			return fmt.Errorf("failed to query user %s: %w", userName, queryErr)
 		}
 
 		actualSet := make(map[string]bool)
@@ -359,7 +359,7 @@ func testAccCheckUserNotExists(userName string) resource.TestCheckFunc {
 			return fmt.Errorf("user %s still exists, expected it to be deleted", userName)
 		}
 		if !queryErr.Matches(astypes.INVALID_USER) {
-			return fmt.Errorf("unexpected error checking user %s: %s", userName, queryErr)
+			return fmt.Errorf("unexpected error checking user %s: %w", userName, queryErr)
 		}
 		return nil
 	}

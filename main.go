@@ -36,7 +36,7 @@ func main() {
 
 	flag.BoolVar(&debug, "debug", false, "set to true to run the provider with support for debuggers like delve")
 	flag.Parse()
-	//debug = true
+	// debug = true
 	opts := providerserver.ServeOpts{
 		Address: "registry.terraform.io/hsafra/aerospike",
 		Debug:   debug,

@@ -9,6 +9,7 @@ import (
 	as "github.com/aerospike/aerospike-client-go/v8"
 	astypes "github.com/aerospike/aerospike-client-go/v8/types"
 	"github.com/ghetzel/go-stockutil/sliceutil"
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -22,6 +23,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"math"
 	"reflect"
 	"strings"
 )
@@ -115,12 +117,18 @@ func (r *AerospikeRole) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Optional:    true,
 				Computed:    true,
 				Default:     int64default.StaticInt64(0),
+				Validators: []validator.Int64{
+					int64validator.Between(0, math.MaxUint32),
+				},
 			},
 			"write_quota": schema.Int64Attribute{
 				Description: "write quota to apply to the role",
 				Optional:    true,
 				Computed:    true,
 				Default:     int64default.StaticInt64(0),
+				Validators: []validator.Int64{
+					int64validator.Between(0, math.MaxUint32),
+				},
 			},
 		},
 	}
@@ -158,8 +166,8 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	roleName := data.Role_name.ValueString()
-	readQuota := uint32(data.Read_quota.ValueInt64())
-	writeQuota := uint32(data.Write_quota.ValueInt64())
+	readQuota := uint32(data.Read_quota.ValueInt64())   //nolint:gosec // schema validator ensures 0..MaxUint32
+	writeQuota := uint32(data.Write_quota.ValueInt64()) //nolint:gosec // schema validator ensures 0..MaxUint32
 
 	privElements := make([]types.Object, 0, len(data.Privileges.Elements()))
 	data.Privileges.ElementsAs(ctx, &privElements, false)
@@ -288,7 +296,7 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	data.Role_name = plan.Role_name
 
-	//privileges
+	// privileges
 	if reflect.DeepEqual(plan.Privileges, state.Privileges) {
 		data.Privileges = plan.Privileges
 	} else {
@@ -353,7 +361,7 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 
 	}
 
-	//whitelist
+	// whitelist
 	if !reflect.DeepEqual(plan.White_list, state.White_list) {
 		whiteList := make([]string, 0)
 		for _, w := range plan.White_list {
@@ -366,10 +374,10 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 	data.White_list = plan.White_list
 
-	//qoutas
+	// quotas
 	if plan.Read_quota != state.Read_quota || plan.Write_quota != state.Write_quota {
-		err := r.asConn.client.SetQuotas(adminPol, data.Role_name.ValueString(), uint32(plan.Read_quota.ValueInt64()),
-			uint32(plan.Write_quota.ValueInt64()))
+		err := r.asConn.client.SetQuotas(adminPol, data.Role_name.ValueString(), uint32(plan.Read_quota.ValueInt64()), //nolint:gosec // schema validator ensures 0..MaxUint32
+			uint32(plan.Write_quota.ValueInt64())) //nolint:gosec // schema validator ensures 0..MaxUint32
 		if err != nil && err.Matches(astypes.QUOTAS_NOT_ENABLED) {
 			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Quotas not enabled", "Role quotas are requests but not enabled in the server"))
 			return
