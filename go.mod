@@ -3,7 +3,7 @@ module terraform-provider-aerospike
 go 1.25.0
 
 require (
-	github.com/aerospike/aerospike-client-go/v8 v8.6.0
+	github.com/aerospike/aerospike-client-go/v8 v8.7.0
 	github.com/ghetzel/go-stockutil v1.14.3
 	github.com/hashicorp/terraform-plugin-docs v0.24.0
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
@@ -76,7 +76,7 @@ require (
 	github.com/wadey/gocovmerge v0.0.0-20160331181800-b5bfa59ec0ad // indirect
 	github.com/yuin/goldmark v1.7.7 // indirect
 	github.com/yuin/goldmark-meta v1.1.0 // indirect
-	github.com/yuin/gopher-lua v1.1.1 // indirect
+	github.com/yuin/gopher-lua v1.1.2 // indirect
 	github.com/zclconf/go-cty v1.17.0 // indirect
 	go.abhg.dev/goldmark/frontmatter v0.2.0 // indirect
 	golang.org/x/crypto v0.49.0 // indirect
