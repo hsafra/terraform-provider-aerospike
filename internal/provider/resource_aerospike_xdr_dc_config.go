@@ -236,14 +236,20 @@ func (r *AerospikeXDRDCConfig) Read(ctx context.Context, req resource.ReadReques
 		return
 	}
 
-	// Read DC-level params
+	// Read DC-level params from every node so cross-node divergence becomes
+	// a planned re-apply rather than a silently-masked drift.
 	if !data.Params.IsNull() {
-		serverConfig, err := getXDRDCConfig(r.asConn.client, dc)
+		priorDCState := stringMapFromTypesMap(data.Params)
+		serverConfig, divergences, err := getXDRDCConfigAllNodes(r.asConn.client, dc, priorDCState)
 		if err != nil {
 			resp.Diagnostics.AddError("Error reading XDR DC config",
 				fmt.Sprintf("Could not read config for DC %q: %s", dc, err.Error()))
 			return
 		}
+
+		appendDivergenceWarnings(&resp.Diagnostics, divergences, priorDCState,
+			"XDR DC parameter differs across cluster nodes",
+			fmt.Sprintf("DC %q", dc))
 
 		updatedParams := make(map[string]string)
 		for key := range data.Params.Elements() {
@@ -267,11 +273,16 @@ func (r *AerospikeXDRDCConfig) Read(ctx context.Context, req resource.ReadReques
 		nsName := ns.Name.ValueString()
 
 		if !ns.Params.IsNull() {
-			serverNsConfig, err := getXDRDCNamespaceConfig(r.asConn.client, dc, nsName)
+			priorNsState := stringMapFromTypesMap(ns.Params)
+			serverNsConfig, divergences, err := getXDRDCNamespaceConfigAllNodes(r.asConn.client, dc, nsName, priorNsState)
 			if err != nil {
 				tflog.Trace(ctx, fmt.Sprintf("could not read XDR DC namespace config for %s/%s: %s", dc, nsName, err.Error()))
 				continue
 			}
+
+			appendDivergenceWarnings(&resp.Diagnostics, divergences, priorNsState,
+				"XDR DC namespace parameter differs across cluster nodes",
+				fmt.Sprintf("namespace %q in DC %q", nsName, dc))
 
 			updatedParams := make(map[string]string)
 			for key := range ns.Params.Elements() {
@@ -289,11 +300,22 @@ func (r *AerospikeXDRDCConfig) Read(ctx context.Context, req resource.ReadReques
 
 		// Read set policy state from server config
 		if len(ns.SetPolicy) > 0 {
-			serverNsConfig, err := getXDRDCNamespaceConfig(r.asConn.client, dc, nsName)
+			// ship-only-specified-sets is a single key; we need the same fan-out
+			// for it. Use prior state derived from the current bool.
+			priorSosVal := "false"
+			if ns.SetPolicy[0].ShipOnlySpecifiedSets.ValueBool() {
+				priorSosVal = "true"
+			}
+			priorSetPolicyState := map[string]string{"ship-only-specified-sets": priorSosVal}
+			serverNsConfig, divergences, err := getXDRDCNamespaceConfigAllNodes(r.asConn.client, dc, nsName, priorSetPolicyState)
 			if err != nil {
 				tflog.Trace(ctx, fmt.Sprintf("could not read XDR DC namespace config for set_policy %s/%s: %s", dc, nsName, err.Error()))
 				continue
 			}
+
+			appendDivergenceWarnings(&resp.Diagnostics, divergences, priorSetPolicyState,
+				"XDR set policy differs across cluster nodes",
+				fmt.Sprintf("namespace %q in DC %q", nsName, dc))
 
 			policy := ns.SetPolicy[0]
 

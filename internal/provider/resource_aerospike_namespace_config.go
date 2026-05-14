@@ -161,8 +161,10 @@ func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRe
 		return
 	}
 
-	// Read current namespace config from server
-	serverConfig, err := getNamespaceConfig(r.asConn.client, namespace)
+	// Read current namespace config from every node so cross-node divergence
+	// becomes a planned re-apply rather than a silently-masked drift.
+	priorNsState := stringMapFromTypesMap(data.Params)
+	serverConfig, nsDivergences, err := getNamespaceConfigAllNodes(r.asConn.client, namespace, priorNsState)
 	if err != nil {
 		resp.Diagnostics.AddError("Error reading namespace config",
 			fmt.Sprintf("Could not read config for namespace %q: %s", namespace, err.Error()))
@@ -173,6 +175,10 @@ func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRe
 	// On import, params will be null — we leave it null so only params
 	// declared in the user's HCL config are tracked (avoids drift).
 	if !data.Params.IsNull() {
+		appendDivergenceWarnings(&resp.Diagnostics, nsDivergences, priorNsState,
+			"Namespace parameter differs across cluster nodes",
+			fmt.Sprintf("namespace %q", namespace))
+
 		updatedParams := make(map[string]string)
 		for key := range data.Params.Elements() {
 			if serverVal, ok := serverConfig[key]; ok {
@@ -199,12 +205,17 @@ func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRe
 				continue
 			}
 
-			serverSetConfig, err := getSetConfig(r.asConn.client, namespace, setName)
+			priorSetState := stringMapFromTypesMap(innerMap)
+			serverSetConfig, setDivergences, err := getSetConfigAllNodes(r.asConn.client, namespace, setName, priorSetState)
 			if err != nil {
 				resp.Diagnostics.AddError("Error reading set config",
 					fmt.Sprintf("Failed to read set config for %s/%s: %s", namespace, setName, err.Error()))
 				return
 			}
+
+			appendDivergenceWarnings(&resp.Diagnostics, setDivergences, priorSetState,
+				"Set parameter differs across cluster nodes",
+				fmt.Sprintf("set %q in namespace %q", setName, namespace))
 
 			setParams := make(map[string]string)
 			for key, val := range innerMap.Elements() {

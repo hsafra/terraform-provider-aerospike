@@ -129,8 +129,10 @@ func (r *AerospikeServiceConfig) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
-	// Read current service config from server
-	serverConfig, err := getServiceConfig(r.asConn.client)
+	// Read current service config from every node so cross-node divergence
+	// becomes a planned re-apply rather than a silently-masked drift.
+	priorState := stringMapFromTypesMap(data.Params)
+	serverConfig, divergences, err := getServiceConfigAllNodes(r.asConn.client, priorState)
 	if err != nil {
 		resp.Diagnostics.AddError("Error reading service config",
 			fmt.Sprintf("Could not read service config: %s", err.Error()))
@@ -141,6 +143,9 @@ func (r *AerospikeServiceConfig) Read(ctx context.Context, req resource.ReadRequ
 	// On import, params will be null — we leave it null so only params
 	// declared in the user's HCL config are tracked (avoids drift).
 	if !data.Params.IsNull() {
+		appendDivergenceWarnings(&resp.Diagnostics, divergences, priorState,
+			"Service parameter differs across cluster nodes", "")
+
 		updatedParams := make(map[string]string)
 		for key := range data.Params.Elements() {
 			if serverVal, ok := serverConfig[key]; ok {

@@ -6,11 +6,16 @@ package provider
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	as "github.com/aerospike/aerospike-client-go/v8"
 	astypes "github.com/aerospike/aerospike-client-go/v8/types"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"golang.org/x/sync/errgroup"
 )
 
 type asCapabilities int
@@ -38,26 +43,35 @@ func sendInfoCommand(conn *as.Client, command string) (map[string]string, error)
 	return sendInfoToNode(node, command)
 }
 
-// sendInfoCommandAllNodes sends an asinfo command to ALL nodes in the cluster.
-// Use this for write commands (set-config, etc.) because Aerospike set-config commands
-// are per-node — they are NOT automatically distributed via SMD to other cluster members.
-// This follows the same approach as asadm, which fans out config commands to every node.
+// sendInfoCommandAllNodes sends an asinfo command to ALL nodes in the cluster
+// in parallel. Use this for write commands (set-config, etc.) because Aerospike
+// set-config commands are per-node — they are NOT automatically distributed via
+// SMD to other cluster members. This follows the same approach as asadm, which
+// fans out config commands to every node. Returns the last node's response for
+// API parity; callers currently only check the error.
 func sendInfoCommandAllNodes(conn *as.Client, command string) (map[string]string, error) { //nolint:unparam // callers may use the result in the future
 	nodes := conn.GetNodes()
 	if len(nodes) == 0 {
 		return nil, errors.New("no nodes available in cluster")
 	}
 
-	var lastResult map[string]string
-	for _, node := range nodes {
-		result, err := sendInfoToNode(node, command)
-		if err != nil {
-			return nil, fmt.Errorf("node %s: %w", node.GetName(), err)
-		}
-		lastResult = result
+	results := make([]map[string]string, len(nodes))
+	var g errgroup.Group
+	for i, node := range nodes {
+		g.Go(func() error {
+			result, err := sendInfoToNode(node, command)
+			if err != nil {
+				return fmt.Errorf("node %s: %w", node.GetName(), err)
+			}
+			results[i] = result
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
-	return lastResult, nil
+	return results[len(results)-1], nil
 }
 
 // smdRaceError is the error Aerospike returns when a structural XDR command
@@ -94,8 +108,26 @@ func sendInfoCommandAllNodesSMD(conn *as.Client, command string) (map[string]str
 	return result, nil
 }
 
-// sendInfoToNode sends an asinfo command to a specific node and checks for errors.
+// infoRetryDelay is the pause before the single retry attempted by
+// sendInfoToNode. Short on purpose: only meant to absorb a momentary
+// network blip, not to mask a real failure.
+const infoRetryDelay = 500 * time.Millisecond
+
+// sendInfoToNode sends an asinfo command to a specific node. On any error
+// it sleeps infoRetryDelay and retries once, so a transient network blip
+// does not fail an entire plan or apply. After the second failure the
+// error is returned and the caller fails fast.
 func sendInfoToNode(node *as.Node, command string) (map[string]string, error) {
+	result, err := sendInfoToNodeOnce(node, command)
+	if err == nil {
+		return result, nil
+	}
+	time.Sleep(infoRetryDelay)
+	return sendInfoToNodeOnce(node, command)
+}
+
+// sendInfoToNodeOnce is a single attempt of an asinfo command — no retries.
+func sendInfoToNodeOnce(node *as.Node, command string) (map[string]string, error) {
 	policy := as.NewInfoPolicy()
 	result, err := node.RequestInfo(policy, command)
 	if err != nil {
@@ -111,6 +143,180 @@ func sendInfoToNode(node *as.Node, command string) (map[string]string, error) {
 	return result, nil
 }
 
+// nodeDivergence describes a single config key whose value differs across
+// nodes. NodeValues maps nodeName -> value (only nodes that reported the
+// key are listed).
+type nodeDivergence struct {
+	Key        string
+	NodeValues map[string]string
+}
+
+// formatNodeValues renders a divergence's per-node values in stable order,
+// suitable for embedding in a diagnostic message.
+func (d nodeDivergence) formatNodeValues() string {
+	names := make([]string, 0, len(d.NodeValues))
+	for n := range d.NodeValues {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, n := range names {
+		parts = append(parts, fmt.Sprintf("%s=%q", n, d.NodeValues[n]))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// stringMapFromTypesMap extracts the string values of a types.Map into a
+// plain map[string]string. Non-string elements and null/unknown values
+// are skipped. Used to derive prior state for reduceNodeConfigs.
+func stringMapFromTypesMap(m types.Map) map[string]string {
+	out := make(map[string]string)
+	if m.IsNull() || m.IsUnknown() {
+		return out
+	}
+	for k, v := range m.Elements() {
+		if s, ok := v.(types.String); ok && !s.IsNull() && !s.IsUnknown() {
+			out[k] = s.ValueString()
+		}
+	}
+	return out
+}
+
+// appendDivergenceWarnings emits one warning diagnostic per divergence whose
+// key is present in `managed` (typically the priorState passed to
+// reduceNodeConfigs, so only user-declared keys produce a warning). `where`
+// is appended to the detail message to identify the context — e.g.
+// "namespace \"foo\"" or "DC \"bar\""; pass "" when the context is implicit
+// (e.g. the cluster-wide service config).
+func appendDivergenceWarnings(diags *diag.Diagnostics, divergences []nodeDivergence, managed map[string]string, summary, where string) {
+	for _, d := range divergences {
+		if _, ok := managed[d.Key]; !ok {
+			continue
+		}
+		var detail string
+		if where == "" {
+			detail = fmt.Sprintf("Parameter %q has different values across cluster nodes: %s. "+
+				"Terraform will re-apply the configured value on the next apply to converge the cluster.",
+				d.Key, d.formatNodeValues())
+		} else {
+			detail = fmt.Sprintf("Parameter %q on %s has different values across cluster nodes: %s. "+
+				"Terraform will re-apply the configured value on the next apply to converge the cluster.",
+				d.Key, where, d.formatNodeValues())
+		}
+		diags.AddWarning(summary, detail)
+	}
+}
+
+// parseSemicolonKV parses a ";"-separated list of "key=value" pairs, the
+// format Aerospike's get-config family returns. Empty or malformed pairs
+// are silently skipped.
+func parseSemicolonKV(raw string) map[string]string {
+	out := make(map[string]string)
+	for _, pair := range strings.Split(raw, ";") {
+		kv := strings.SplitN(pair, "=", 2)
+		if len(kv) == 2 {
+			out[kv[0]] = kv[1]
+		}
+	}
+	return out
+}
+
+// fetchConfigAllNodes runs an asinfo command on every node in parallel and
+// parses the response as ";"-separated key=value pairs. Returns
+// nodeName -> key -> value. Fails fast if any node returns an error (after the
+// per-node retry).
+func fetchConfigAllNodes(conn *as.Client, command string) (map[string]map[string]string, error) {
+	nodes := conn.GetNodes()
+	if len(nodes) == 0 {
+		return nil, errors.New("no nodes available in cluster")
+	}
+
+	out := make(map[string]map[string]string, len(nodes))
+	var mu sync.Mutex
+	var g errgroup.Group
+	for _, node := range nodes {
+		g.Go(func() error {
+			result, err := sendInfoToNode(node, command)
+			if err != nil {
+				return fmt.Errorf("node %s: %w", node.GetName(), err)
+			}
+			parsed := parseSemicolonKV(result[command])
+			mu.Lock()
+			out[node.GetName()] = parsed
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// reduceNodeConfigs collapses per-node configs into a single config map and
+// reports any keys where nodes disagree. When divergence is detected for a
+// key, the chosen value prefers a node value that differs from priorState
+// for that key — this writes a state that does not match the user's config,
+// so tf-core plans a re-apply that will fan the desired value back out to
+// all nodes. If no node value differs from prior state (or no prior state
+// is known), the most common value wins.
+func reduceNodeConfigs(nodeConfigs map[string]map[string]string, priorState map[string]string) (map[string]string, []nodeDivergence) {
+	keys := make(map[string]struct{})
+	for _, cfg := range nodeConfigs {
+		for k := range cfg {
+			keys[k] = struct{}{}
+		}
+	}
+
+	reduced := make(map[string]string, len(keys))
+	var divergences []nodeDivergence
+
+	for key := range keys {
+		valByNode := make(map[string]string, len(nodeConfigs))
+		counts := make(map[string]int)
+		for nodeName, cfg := range nodeConfigs {
+			v, ok := cfg[key]
+			if !ok {
+				continue
+			}
+			valByNode[nodeName] = v
+			counts[v]++
+		}
+
+		if len(counts) <= 1 {
+			for _, v := range valByNode {
+				reduced[key] = v
+				break
+			}
+			continue
+		}
+
+		divergences = append(divergences, nodeDivergence{Key: key, NodeValues: valByNode})
+
+		chosen, set := "", false
+		if priorVal, hadPrior := priorState[key]; hadPrior {
+			for _, v := range valByNode {
+				if v != priorVal {
+					chosen = v
+					set = true
+					break
+				}
+			}
+		}
+		if !set {
+			bestCount := -1
+			for v, c := range counts {
+				if c > bestCount {
+					bestCount = c
+					chosen = v
+				}
+			}
+		}
+		reduced[key] = chosen
+	}
+	return reduced, divergences
+}
+
 // getNamespaceConfig reads all namespace configuration parameters via get-config and returns them as a map.
 func getNamespaceConfig(conn *as.Client, namespace string) (map[string]string, error) {
 	command := "get-config:context=namespace;id=" + namespace
@@ -118,17 +324,40 @@ func getNamespaceConfig(conn *as.Client, namespace string) (map[string]string, e
 	if err != nil {
 		return nil, err
 	}
+	return parseSemicolonKV(result[command]), nil
+}
 
-	config := make(map[string]string)
-	raw := result[command]
-	pairs := strings.Split(raw, ";")
-	for _, pair := range pairs {
+// getNamespaceConfigAllNodes reads namespace config from every node and
+// returns the reduced map plus any per-key divergences across nodes.
+// priorState is the value previously persisted in Terraform state for the
+// same keys — used to break ties in favor of a value that will force a
+// drift+reapply (see reduceNodeConfigs).
+func getNamespaceConfigAllNodes(conn *as.Client, namespace string, priorState map[string]string) (map[string]string, []nodeDivergence, error) {
+	command := "get-config:context=namespace;id=" + namespace
+	perNode, err := fetchConfigAllNodes(conn, command)
+	if err != nil {
+		return nil, nil, err
+	}
+	reduced, divergences := reduceNodeConfigs(perNode, priorState)
+	return reduced, divergences, nil
+}
+
+// parseColonKV parses a single set entry, formatted as ":"-separated
+// "key=value" pairs (Aerospike's "sets/<ns>/<set>" response format).
+// Any trailing ";" is stripped before parsing.
+func parseColonKV(raw string) map[string]string {
+	out := make(map[string]string)
+	raw = strings.TrimRight(raw, ";")
+	if raw == "" {
+		return out
+	}
+	for _, pair := range strings.Split(raw, ":") {
 		kv := strings.SplitN(pair, "=", 2)
 		if len(kv) == 2 {
-			config[kv[0]] = kv[1]
+			out[kv[0]] = kv[1]
 		}
 	}
-	return config, nil
+	return out
 }
 
 // getSetConfig reads set-level info via "sets/<namespace>/<set>".
@@ -140,21 +369,39 @@ func getSetConfig(conn *as.Client, namespace, setName string) (map[string]string
 	if err != nil {
 		return nil, err
 	}
+	return parseColonKV(result[command]), nil
+}
 
-	config := make(map[string]string)
-	raw := strings.TrimRight(result[command], ";")
-	if raw == "" {
-		return config, nil
+// getSetConfigAllNodes reads set config from every node in parallel and
+// returns the reduced map plus per-key divergences (see reduceNodeConfigs).
+// priorState is the previously persisted Terraform state for the same set's keys.
+func getSetConfigAllNodes(conn *as.Client, namespace, setName string, priorState map[string]string) (map[string]string, []nodeDivergence, error) {
+	command := "sets/" + namespace + "/" + setName
+	nodes := conn.GetNodes()
+	if len(nodes) == 0 {
+		return nil, nil, errors.New("no nodes available in cluster")
 	}
-
-	pairs := strings.Split(raw, ":")
-	for _, pair := range pairs {
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) == 2 {
-			config[kv[0]] = kv[1]
-		}
+	perNode := make(map[string]map[string]string, len(nodes))
+	var mu sync.Mutex
+	var g errgroup.Group
+	for _, node := range nodes {
+		g.Go(func() error {
+			result, err := sendInfoToNode(node, command)
+			if err != nil {
+				return fmt.Errorf("node %s: %w", node.GetName(), err)
+			}
+			parsed := parseColonKV(result[command])
+			mu.Lock()
+			perNode[node.GetName()] = parsed
+			mu.Unlock()
+			return nil
+		})
 	}
-	return config, nil
+	if err := g.Wait(); err != nil {
+		return nil, nil, err
+	}
+	reduced, divergences := reduceNodeConfigs(perNode, priorState)
+	return reduced, divergences, nil
 }
 
 // getValidSetParamKeys returns the set of valid set-level param keys for a namespace.
@@ -242,17 +489,19 @@ func getServiceConfig(conn *as.Client) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseSemicolonKV(result[command]), nil
+}
 
-	config := make(map[string]string)
-	raw := result[command]
-	pairs := strings.Split(raw, ";")
-	for _, pair := range pairs {
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) == 2 {
-			config[kv[0]] = kv[1]
-		}
+// getServiceConfigAllNodes reads service config from every node and returns
+// the reduced map plus per-key divergences (see reduceNodeConfigs).
+func getServiceConfigAllNodes(conn *as.Client, priorState map[string]string) (map[string]string, []nodeDivergence, error) {
+	command := "get-config:context=service"
+	perNode, err := fetchConfigAllNodes(conn, command)
+	if err != nil {
+		return nil, nil, err
 	}
-	return config, nil
+	reduced, divergences := reduceNodeConfigs(perNode, priorState)
+	return reduced, divergences, nil
 }
 
 // setServiceParam sets a single service-level configuration parameter via set-config.
@@ -269,17 +518,19 @@ func getXDRDCConfig(conn *as.Client, dc string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseSemicolonKV(result[command]), nil
+}
 
-	config := make(map[string]string)
-	raw := result[command]
-	pairs := strings.Split(raw, ";")
-	for _, pair := range pairs {
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) == 2 {
-			config[kv[0]] = kv[1]
-		}
+// getXDRDCConfigAllNodes reads XDR DC config from every node and returns
+// the reduced map plus per-key divergences (see reduceNodeConfigs).
+func getXDRDCConfigAllNodes(conn *as.Client, dc string, priorState map[string]string) (map[string]string, []nodeDivergence, error) {
+	command := "get-config:context=xdr;dc=" + dc
+	perNode, err := fetchConfigAllNodes(conn, command)
+	if err != nil {
+		return nil, nil, err
 	}
-	return config, nil
+	reduced, divergences := reduceNodeConfigs(perNode, priorState)
+	return reduced, divergences, nil
 }
 
 // getXDRDCNamespaceConfig reads namespace-level XDR configuration for a DC/namespace pair.
@@ -289,17 +540,19 @@ func getXDRDCNamespaceConfig(conn *as.Client, dc, namespace string) (map[string]
 	if err != nil {
 		return nil, err
 	}
+	return parseSemicolonKV(result[command]), nil
+}
 
-	config := make(map[string]string)
-	raw := result[command]
-	pairs := strings.Split(raw, ";")
-	for _, pair := range pairs {
-		kv := strings.SplitN(pair, "=", 2)
-		if len(kv) == 2 {
-			config[kv[0]] = kv[1]
-		}
+// getXDRDCNamespaceConfigAllNodes reads XDR DC namespace config from every
+// node and returns the reduced map plus per-key divergences.
+func getXDRDCNamespaceConfigAllNodes(conn *as.Client, dc, namespace string, priorState map[string]string) (map[string]string, []nodeDivergence, error) {
+	command := "get-config:context=xdr;dc=" + dc + ";namespace=" + namespace
+	perNode, err := fetchConfigAllNodes(conn, command)
+	if err != nil {
+		return nil, nil, err
 	}
-	return config, nil
+	reduced, divergences := reduceNodeConfigs(perNode, priorState)
+	return reduced, divergences, nil
 }
 
 // dcExists checks whether a datacenter exists in the XDR configuration.

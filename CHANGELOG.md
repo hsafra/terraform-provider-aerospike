@@ -1,3 +1,12 @@
+## 0.5.4
+BUG FIXES:
+* Detect cross-node config drift — reads now fan out to every node and prefer a value differing from prior state when nodes disagree, so `terraform refresh`/`plan` sees the drift and the next apply converges the cluster; per-node values surface as warning diagnostics
+* Absorb momentary network blips — each per-node asinfo call retries once after 500ms before failing
+
+ENHANCEMENTS:
+* Parallelize fan-out reads and non-SMD writes across cluster nodes for faster plan/apply
+* Raise CI acceptance test timeouts to accommodate the larger multi-node test suite
+
 ## 0.5.3
 BUG FIXES:
 * Strip `storage-engine.` subcontext prefix from namespace parameters in `set-config` commands — Aerospike's `get-config` returns these params with the prefix but `set-config` rejects it
