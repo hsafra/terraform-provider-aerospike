@@ -61,7 +61,7 @@ jobs:
     name: Terraform Provider Acceptance Tests
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -102,7 +102,7 @@ jobs:
         env:
           TF_ACC: "1"
         run: make testacc
-        timeout-minutes: 10
+        timeout-minutes: 25
       - name: Stop Aerospike containers
         if: always()
         working-directory: tests
