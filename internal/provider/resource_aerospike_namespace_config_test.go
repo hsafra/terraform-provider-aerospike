@@ -428,6 +428,96 @@ func TestAccAerospikeNamespaceConfig_serverDrift(t *testing.T) {
 	})
 }
 
+// #19: Cross-node divergence detection. Writes a different value to a single
+// cluster node out-of-band (bypassing the provider's all-nodes fan-out), then
+// verifies that refresh detects the divergence via getNamespaceConfigAllNodes
+// and produces a non-empty plan, and that the subsequent apply converges all
+// nodes back to the configured value.
+func TestAccAerospikeNamespaceConfig_crossNodeDivergence(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccNamespaceConfigPreCheck(t)
+			testAccRequireMultiNode(t)
+		},
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			// 1. Apply baseline; provider fans out to every node.
+			{
+				Config: testAccNamespaceConfigWithParam("default-ttl", "500"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "500"),
+					testAccCheckAllNodesNamespaceParam("aerospike", "default-ttl", "500"),
+				),
+			},
+			// 2. Drive the cluster into a divergent state by writing 777 to a
+			//    single node only — bypasses setNamespaceParam so the other
+			//    nodes keep value 500. Refresh+plan must detect this and
+			//    surface a non-empty plan.
+			{
+				PreConfig: func() {
+					client, err := testAccGetAerospikeClient()
+					if err != nil {
+						t.Fatalf("failed to get client: %s", err)
+					}
+					defer client.Close()
+					nodes := client.GetNodes()
+					if len(nodes) == 0 {
+						t.Fatalf("no cluster nodes available")
+					}
+					_, err = sendInfoToNode(nodes[0], "set-config:context=namespace;id=aerospike;default-ttl=777")
+					if err != nil {
+						t.Fatalf("failed to set divergent value on node %s: %s", nodes[0].GetName(), err)
+					}
+				},
+				Config:             testAccNamespaceConfigWithParam("default-ttl", "500"),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			// 3. Apply: provider re-fans default-ttl=500 to every node and the
+			//    cluster converges.
+			{
+				Config: testAccNamespaceConfigWithParam("default-ttl", "500"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "500"),
+					testAccCheckAllNodesNamespaceParam("aerospike", "default-ttl", "500"),
+				),
+			},
+		},
+	})
+}
+
+// testAccCheckAllNodesNamespaceParam verifies a namespace config parameter has
+// the expected value on EVERY cluster node (not just the one the test client
+// happens to land on). Used to assert post-apply convergence.
+func testAccCheckAllNodesNamespaceParam(namespace, key, expected string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		client, err := testAccGetAerospikeClient()
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+
+		command := "get-config:context=namespace;id=" + namespace
+		for _, node := range client.GetNodes() {
+			result, err := sendInfoToNode(node, command)
+			if err != nil {
+				return fmt.Errorf("node %s: %w", node.GetName(), err)
+			}
+			cfg := parseSemicolonKV(result[command])
+			actual, ok := cfg[key]
+			if !ok {
+				return fmt.Errorf("node %s: namespace %q param %q missing", node.GetName(), namespace, key)
+			}
+			if actual != expected {
+				return fmt.Errorf("node %s: namespace %q param %q: expected %q, got %q",
+					node.GetName(), namespace, key, expected, actual)
+			}
+		}
+		return nil
+	}
+}
+
 func testAccNamespaceConfigMultipleSets() string {
 	return `
 resource "aerospike_namespace_config" "test" {
