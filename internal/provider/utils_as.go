@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	as "github.com/aerospike/aerospike-client-go/v8"
 	astypes "github.com/aerospike/aerospike-client-go/v8/types"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"golang.org/x/sync/errgroup"
 )
 
 type asCapabilities int
@@ -41,26 +43,35 @@ func sendInfoCommand(conn *as.Client, command string) (map[string]string, error)
 	return sendInfoToNode(node, command)
 }
 
-// sendInfoCommandAllNodes sends an asinfo command to ALL nodes in the cluster.
-// Use this for write commands (set-config, etc.) because Aerospike set-config commands
-// are per-node — they are NOT automatically distributed via SMD to other cluster members.
-// This follows the same approach as asadm, which fans out config commands to every node.
+// sendInfoCommandAllNodes sends an asinfo command to ALL nodes in the cluster
+// in parallel. Use this for write commands (set-config, etc.) because Aerospike
+// set-config commands are per-node — they are NOT automatically distributed via
+// SMD to other cluster members. This follows the same approach as asadm, which
+// fans out config commands to every node. Returns the last node's response for
+// API parity; callers currently only check the error.
 func sendInfoCommandAllNodes(conn *as.Client, command string) (map[string]string, error) { //nolint:unparam // callers may use the result in the future
 	nodes := conn.GetNodes()
 	if len(nodes) == 0 {
 		return nil, errors.New("no nodes available in cluster")
 	}
 
-	var lastResult map[string]string
-	for _, node := range nodes {
-		result, err := sendInfoToNode(node, command)
-		if err != nil {
-			return nil, fmt.Errorf("node %s: %w", node.GetName(), err)
-		}
-		lastResult = result
+	results := make([]map[string]string, len(nodes))
+	var g errgroup.Group
+	for i, node := range nodes {
+		g.Go(func() error {
+			result, err := sendInfoToNode(node, command)
+			if err != nil {
+				return fmt.Errorf("node %s: %w", node.GetName(), err)
+			}
+			results[i] = result
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
-	return lastResult, nil
+	return results[len(results)-1], nil
 }
 
 // smdRaceError is the error Aerospike returns when a structural XDR command
@@ -210,9 +221,10 @@ func parseSemicolonKV(raw string) map[string]string {
 	return out
 }
 
-// fetchConfigAllNodes runs an asinfo command on every node and parses the
-// response as ";"-separated key=value pairs. Returns nodeName -> key -> value.
-// Fails fast if any node returns an error (after the per-node retry).
+// fetchConfigAllNodes runs an asinfo command on every node in parallel and
+// parses the response as ";"-separated key=value pairs. Returns
+// nodeName -> key -> value. Fails fast if any node returns an error (after the
+// per-node retry).
 func fetchConfigAllNodes(conn *as.Client, command string) (map[string]map[string]string, error) {
 	nodes := conn.GetNodes()
 	if len(nodes) == 0 {
@@ -220,12 +232,23 @@ func fetchConfigAllNodes(conn *as.Client, command string) (map[string]map[string
 	}
 
 	out := make(map[string]map[string]string, len(nodes))
+	var mu sync.Mutex
+	var g errgroup.Group
 	for _, node := range nodes {
-		result, err := sendInfoToNode(node, command)
-		if err != nil {
-			return nil, fmt.Errorf("node %s: %w", node.GetName(), err)
-		}
-		out[node.GetName()] = parseSemicolonKV(result[command])
+		g.Go(func() error {
+			result, err := sendInfoToNode(node, command)
+			if err != nil {
+				return fmt.Errorf("node %s: %w", node.GetName(), err)
+			}
+			parsed := parseSemicolonKV(result[command])
+			mu.Lock()
+			out[node.GetName()] = parsed
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -349,9 +372,9 @@ func getSetConfig(conn *as.Client, namespace, setName string) (map[string]string
 	return parseColonKV(result[command]), nil
 }
 
-// getSetConfigAllNodes reads set config from every node and returns the
-// reduced map plus per-key divergences (see reduceNodeConfigs). priorState
-// is the previously persisted Terraform state for the same set's keys.
+// getSetConfigAllNodes reads set config from every node in parallel and
+// returns the reduced map plus per-key divergences (see reduceNodeConfigs).
+// priorState is the previously persisted Terraform state for the same set's keys.
 func getSetConfigAllNodes(conn *as.Client, namespace, setName string, priorState map[string]string) (map[string]string, []nodeDivergence, error) {
 	command := "sets/" + namespace + "/" + setName
 	nodes := conn.GetNodes()
@@ -359,12 +382,23 @@ func getSetConfigAllNodes(conn *as.Client, namespace, setName string, priorState
 		return nil, nil, errors.New("no nodes available in cluster")
 	}
 	perNode := make(map[string]map[string]string, len(nodes))
+	var mu sync.Mutex
+	var g errgroup.Group
 	for _, node := range nodes {
-		result, err := sendInfoToNode(node, command)
-		if err != nil {
-			return nil, nil, fmt.Errorf("node %s: %w", node.GetName(), err)
-		}
-		perNode[node.GetName()] = parseColonKV(result[command])
+		g.Go(func() error {
+			result, err := sendInfoToNode(node, command)
+			if err != nil {
+				return fmt.Errorf("node %s: %w", node.GetName(), err)
+			}
+			parsed := parseColonKV(result[command])
+			mu.Lock()
+			perNode[node.GetName()] = parsed
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, nil, err
 	}
 	reduced, divergences := reduceNodeConfigs(perNode, priorState)
 	return reduced, divergences, nil
