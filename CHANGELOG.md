@@ -1,3 +1,11 @@
+## 0.5.5
+BUG FIXES:
+* Fix the client silently managing only a subset of a multi-node cluster. `UseServicesAlternate` was hard-coded to `true`, which forces peer discovery through each node's alternate-access address. When nodes are reached directly (e.g. behind AWS Cloud Map / a load balancer that returns a capped, rotating subset of seed addresses) and advertise no alternate address, peer discovery finds nothing and the client only ever sees the seed nodes — so service/namespace/set/XDR config reads and writes reach just that subset while still reporting success.
+
+ENHANCEMENTS:
+* New `use_services_alternate` provider attribute (default `false`, overridable via `AEROSPIKE_USE_SERVICES_ALTERNATE`) — enable only for NAT/Docker topologies where every node has an alternate-access address; leave disabled so peer discovery can tend the whole cluster
+* Cluster-coverage guard — on connect, compare the number of discovered nodes against the server-reported `cluster_size` and emit a loud warning when the client only sees a subset, so partial-cluster applies can no longer pass silently
+
 ## 0.5.4
 BUG FIXES:
 * Detect cross-node config drift — reads now fan out to every node and prefer a value differing from prior state when nodes disagree, so `terraform refresh`/`plan` sees the drift and the next apply converges the cluster; per-node values surface as warning diagnostics
