@@ -4,7 +4,7 @@ BUG FIXES:
 
 ENHANCEMENTS:
 * New `use_services_alternate` provider attribute (default `false`, overridable via `AEROSPIKE_USE_SERVICES_ALTERNATE`) — enable only for NAT/Docker topologies where every node has an alternate-access address; leave disabled so peer discovery can tend the whole cluster
-* Cluster-coverage guard — on connect, compare the number of discovered nodes against the server-reported `cluster_size` and emit a loud warning when the client only sees a subset, so partial-cluster applies can no longer pass silently
+* Cluster-coverage guard — on connect, compare the number of discovered nodes against the server-reported `cluster_size` and fail when the client only sees a subset, so partial-cluster applies can no longer proceed silently
 
 ## 0.5.4
 BUG FIXES:

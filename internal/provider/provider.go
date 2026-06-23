@@ -214,24 +214,22 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 
 	asConn.client = tempConn
 
-	// Warn loudly if the client only discovered a subset of the cluster. Per-node
-	// config reads and writes (service/namespace/set/XDR) only reach the nodes in
-	// conn.GetNodes(), so partial discovery means an apply silently manages just
-	// part of the cluster while still reporting success.
+	// Fail if the client only discovered a subset of the cluster. Per-node config
+	// reads and writes (service/namespace/set/XDR) only reach the nodes in
+	// conn.GetNodes(), so partial discovery would silently manage just part of the
+	// cluster — refuse to proceed instead.
 	if clusterSize, sizeErr := getClusterSize(tempConn); sizeErr == nil {
 		discovered := len(tempConn.GetNodes())
 		if discovered < clusterSize {
-			resp.Diagnostics.AddWarning(
+			resp.Diagnostics.AddError(
 				"Aerospike client connected to only a subset of the cluster",
 				fmt.Sprintf("The provider discovered %d node(s) but the cluster reports cluster_size=%d. "+
-					"Per-node configuration reads and writes only reach the discovered node(s), so an apply may "+
-					"silently manage only part of the cluster. This commonly happens when the seed resolves through "+
-					"a load balancer or DNS that returns a capped, rotating subset of nodes (for example AWS Cloud Map) "+
-					"and peer discovery cannot reach the rest. Verify every node is directly reachable from where "+
-					"Terraform runs and review the use_services_alternate setting — peer discovery must be able to "+
-					"resolve and connect to all nodes.",
+					"Per-node configuration reads and writes only reach the discovered node(s), so proceeding "+
+					"would manage only part of the cluster. Refusing to continue until the client can connect to "+
+					"every node in the cluster.",
 					discovered, clusterSize),
 			)
+			return
 		}
 	}
 
