@@ -33,6 +33,7 @@ provider "aerospike" {
 - `password` (String, Sensitive) Admin password. Defaults to the environment variable AEROSPIKE_PASSWORD
 - `port` (Number) Port to connect to. Defaults to the environment variable AEROSPIKE_PORT
 - `tls` (Attributes) (see [below for nested schema](#nestedatt--tls))
+- `use_services_alternate` (Boolean) Use the alternate access address ("services-alternate") advertised by the nodes for peer discovery and connections. Defaults to false (use the standard access addresses), or the environment variable AEROSPIKE_USE_SERVICES_ALTERNATE. Only enable this when the client reaches the cluster through NAT/Docker and every node is configured with an alternate-access-address. Enabling it when the nodes do not advertise an alternate address breaks peer discovery, leaving the client connected only to the seed nodes — so config reads and writes would silently manage just a subset of the cluster.
 - `user_name` (String) Admin username. Defaults to the environment variable AEROSPIKE_USER
 
 <a id="nestedatt--tls"></a>

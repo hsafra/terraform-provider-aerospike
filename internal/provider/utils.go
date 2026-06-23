@@ -28,3 +28,15 @@ func withEnvironmentOverrideInt64(currentValue int64, envOverrideKey string) int
 
 	return currentValue
 }
+
+func withEnvironmentOverrideBool(currentValue bool, envOverrideKey string) bool {
+	envValue, ok := os.LookupEnv(envOverrideKey)
+	if ok {
+		b, err := strconv.ParseBool(envValue)
+		if err == nil {
+			return b
+		}
+	}
+
+	return currentValue
+}

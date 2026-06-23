@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -480,6 +481,29 @@ func setNamespaceSetParam(conn *as.Client, namespace, setName, key, value string
 	command := "set-config:context=namespace;id=" + namespace + ";set=" + setName + ";" + key + "=" + value
 	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
+}
+
+// getClusterSize returns the cluster_size the server reports via the
+// "statistics" info command — the number of nodes the cluster believes it has.
+// It is used to detect when the client has only discovered a subset of the
+// cluster, in which case per-node config reads and writes would silently cover
+// only part of it.
+func getClusterSize(conn *as.Client) (int, error) {
+	command := "statistics"
+	result, err := sendInfoCommand(conn, command)
+	if err != nil {
+		return 0, err
+	}
+	stats := parseSemicolonKV(result[command])
+	sizeStr, ok := stats["cluster_size"]
+	if !ok {
+		return 0, errors.New("cluster_size not found in statistics response")
+	}
+	size, err := strconv.Atoi(sizeStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid cluster_size %q: %w", sizeStr, err)
+	}
+	return size, nil
 }
 
 // getServiceConfig reads all service configuration parameters via get-config and returns them as a map.

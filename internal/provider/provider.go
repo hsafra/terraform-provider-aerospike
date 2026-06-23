@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"time"
@@ -45,6 +46,8 @@ type AerospikeProviderModel struct {
 	Password        types.String `tfsdk:"password"`
 	Connect_timeout types.Int64  `tfsdk:"connect_timeout"`
 	TLS             types.Object `tfsdk:"tls"`
+
+	Use_services_alternate types.Bool `tfsdk:"use_services_alternate"`
 }
 
 type AerospikeTLSConfigModel struct {
@@ -92,6 +95,15 @@ func (p *AerospikeProvider) Schema(ctx context.Context, req provider.SchemaReque
 					int64validator.Between(0, 60),
 				},
 			},
+			"use_services_alternate": schema.BoolAttribute{
+				Description: "Use the alternate access address (\"services-alternate\") advertised by the nodes for peer " +
+					"discovery and connections. Defaults to false (use the standard access addresses), or the environment " +
+					"variable AEROSPIKE_USE_SERVICES_ALTERNATE. Only enable this when the client reaches the cluster through " +
+					"NAT/Docker and every node is configured with an alternate-access-address. Enabling it when the nodes do " +
+					"not advertise an alternate address breaks peer discovery, leaving the client connected only to the seed " +
+					"nodes — so config reads and writes would silently manage just a subset of the cluster.",
+				Optional: true,
+			},
 			"tls": schema.SingleNestedAttribute{
 				Attributes: map[string]schema.Attribute{
 					"tls_name": schema.StringAttribute{
@@ -128,10 +140,12 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 	port := withEnvironmentOverrideInt64(data.Port.ValueInt64(), "AEROSPIKE_PORT")
 	connectTimeout := withEnvironmentOverrideInt64(data.Connect_timeout.ValueInt64(), "AEROSPIKE_CONNECT_TIMEOUT")
 
+	useServicesAlternate := withEnvironmentOverrideBool(data.Use_services_alternate.ValueBool(), "AEROSPIKE_USE_SERVICES_ALTERNATE")
+
 	cp := as.NewClientPolicy()
 	cp.User = user
 	cp.Password = password
-	cp.UseServicesAlternate = true
+	cp.UseServicesAlternate = useServicesAlternate
 	if connectTimeout != 0 {
 		cp.Timeout = time.Second * time.Duration(connectTimeout)
 	}
@@ -199,6 +213,25 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 	}
 
 	asConn.client = tempConn
+
+	// Fail if the client only discovered a subset of the cluster. Per-node config
+	// reads and writes (service/namespace/set/XDR) only reach the nodes in
+	// conn.GetNodes(), so partial discovery would silently manage just part of the
+	// cluster — refuse to proceed instead.
+	if clusterSize, sizeErr := getClusterSize(tempConn); sizeErr == nil {
+		discovered := len(tempConn.GetNodes())
+		if discovered < clusterSize {
+			resp.Diagnostics.AddError(
+				"Aerospike client connected to only a subset of the cluster",
+				fmt.Sprintf("The provider discovered %d node(s) but the cluster reports cluster_size=%d. "+
+					"Per-node configuration reads and writes only reach the discovered node(s), so proceeding "+
+					"would manage only part of the cluster. Refusing to continue until the client can connect to "+
+					"every node in the cluster.",
+					discovered, clusterSize),
+			)
+			return
+		}
+	}
 
 	resp.DataSourceData = &asConn
 	resp.ResourceData = &asConn
