@@ -257,6 +257,8 @@ resource "aerospike_sindex" "test" {
   set        = "%s"
   name       = "%s"
   index_type = "set"
+
+  depends_on = [aerospike_namespace_config.test]
 }
 `, setName, indexName)
 	}
@@ -294,6 +296,8 @@ resource "aerospike_sindex" "smd" {
   set        = "%s"
   name       = "%s"
   index_type = "set"
+
+  depends_on = [aerospike_namespace_config.test]
 }
 `, configSet, smdSet, smdSet, smdName)
 }
