@@ -17,8 +17,8 @@ import (
 
 func testAccSindexPreCheck(t *testing.T) {
 	t.Helper()
-	if os.Getenv(resource.TestEnvVar) == "" {
-		t.Skipf("acceptance tests skipped unless env %s is set", resource.TestEnvVar)
+	if os.Getenv(resource.EnvTfAcc) == "" {
+		t.Skipf("acceptance tests skipped unless env %s is set", resource.EnvTfAcc)
 	}
 	testAccPreCheck(t)
 
@@ -75,7 +75,7 @@ func testAccCheckAerospikeSindexDestroy(s *terraform.State) error {
 	return nil
 }
 
-func testAccCheckSetSindexPresent(namespace, setName, name string) resource.TestCheckFunc {
+func testAccCheckSetSindexPresent(namespace, setName, name string) resource.TestCheckFunc { //nolint:unparam // namespace will vary as more tests are added
 	return func(_ *terraform.State) error {
 		client, err := testAccGetAerospikeClient()
 		if err != nil {
@@ -97,7 +97,7 @@ func testAccCheckSetSindexPresent(namespace, setName, name string) resource.Test
 	}
 }
 
-func testAccCheckSetSindexAbsent(namespace, setName string) resource.TestCheckFunc {
+func testAccCheckSetSindexAbsent(namespace, setName string) resource.TestCheckFunc { //nolint:unparam // namespace will vary as more tests are added
 	return func(_ *terraform.State) error {
 		client, err := testAccGetAerospikeClient()
 		if err != nil {
@@ -116,7 +116,7 @@ func testAccCheckSetSindexAbsent(namespace, setName string) resource.TestCheckFu
 	}
 }
 
-func testAccCheckSetIndexCount(namespace, setName string, want int) resource.TestCheckFunc {
+func testAccCheckSetIndexCount(namespace, setName string, want int) resource.TestCheckFunc { //nolint:unparam // namespace will vary as more tests are added
 	return func(_ *terraform.State) error {
 		client, err := testAccGetAerospikeClient()
 		if err != nil {
@@ -156,7 +156,7 @@ func testAccCheckInfoCommandsNoEnableIndexFalse(resourceName string) resource.Te
 	}
 }
 
-func testAccWriteSetRecords(t *testing.T, namespace, setName string, n int) {
+func testAccWriteSetRecords(t *testing.T, namespace, setName string, n int) { //nolint:unparam // namespace will vary as more tests are added
 	t.Helper()
 	client, err := testAccGetAerospikeClient()
 	if err != nil {
@@ -176,7 +176,7 @@ func testAccWriteSetRecords(t *testing.T, namespace, setName string, n int) {
 	}
 }
 
-func testAccCheckSetEnableIndex(namespace, setName, want string) resource.TestCheckFunc {
+func testAccCheckSetEnableIndex(namespace, setName, want string) resource.TestCheckFunc { //nolint:unparam // namespace will vary as more tests are added
 	return func(_ *terraform.State) error {
 		client, err := testAccGetAerospikeClient()
 		if err != nil {
@@ -196,7 +196,7 @@ func testAccCheckSetEnableIndex(namespace, setName, want string) resource.TestCh
 	}
 }
 
-func testAccCheckSetQueryWorks(namespace, setName string, minRecords int) resource.TestCheckFunc {
+func testAccCheckSetQueryWorks(namespace, setName string, minRecords int) resource.TestCheckFunc { //nolint:unparam // namespace will vary as more tests are added
 	return func(_ *terraform.State) error {
 		client, err := testAccGetAerospikeClient()
 		if err != nil {
@@ -209,7 +209,7 @@ func testAccCheckSetQueryWorks(namespace, setName string, minRecords int) resour
 		if err != nil {
 			return fmt.Errorf("query set %s/%s: %w", namespace, setName, err)
 		}
-		defer rs.Close()
+		defer func() { _ = rs.Close() }()
 
 		count := 0
 		for rec := range rs.Results() {
@@ -550,7 +550,7 @@ func TestAccCreateSetSindexPrivilegeDenied(t *testing.T) {
 	defer admin.Close()
 
 	const user = "sindex_nopriv"
-	const pass = "sindex_nopriv"
+	const pass = "sindex_nopriv" //nolint:gosec // test-only password for a local Docker cluster user
 	adminPol := as.NewAdminPolicy()
 	_ = admin.DropUser(adminPol, user)
 	if createErr := admin.CreateUser(adminPol, user, pass, []string{"read"}); createErr != nil {

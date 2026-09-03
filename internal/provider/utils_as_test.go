@@ -142,9 +142,9 @@ func TestReduceNodeConfigs(t *testing.T) {
 
 func TestParseBuildVersion(t *testing.T) {
 	tests := []struct {
-		in            string
-		maj, min, pat int
-		wantErr       bool
+		in              string
+		maj, minor, pat int
+		wantErr         bool
 	}{
 		{"8.1.2.4", 8, 1, 2, false},
 		{"8.1.2", 8, 1, 2, false},
@@ -155,7 +155,7 @@ func TestParseBuildVersion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
-			maj, min, pat, err := parseBuildVersion(tt.in)
+			maj, minor, pat, err := parseBuildVersion(tt.in)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("parseBuildVersion(%q) expected error", tt.in)
@@ -165,8 +165,8 @@ func TestParseBuildVersion(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseBuildVersion(%q) unexpected error: %v", tt.in, err)
 			}
-			if maj != tt.maj || min != tt.min || pat != tt.pat {
-				t.Errorf("parseBuildVersion(%q) = %d.%d.%d, want %d.%d.%d", tt.in, maj, min, pat, tt.maj, tt.min, tt.pat)
+			if maj != tt.maj || minor != tt.minor || pat != tt.pat {
+				t.Errorf("parseBuildVersion(%q) = %d.%d.%d, want %d.%d.%d", tt.in, maj, minor, pat, tt.maj, tt.minor, tt.pat)
 			}
 		})
 	}
@@ -175,7 +175,7 @@ func TestParseBuildVersion(t *testing.T) {
 func TestVersionAtLeast(t *testing.T) {
 	tests := []struct {
 		name                      string
-		maj, min, pat             int
+		maj, minor, pat           int
 		wantMaj, wantMin, wantPat int
 		want                      bool
 	}{
@@ -189,10 +189,10 @@ func TestVersionAtLeast(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := versionAtLeast(tt.maj, tt.min, tt.pat, tt.wantMaj, tt.wantMin, tt.wantPat)
+			got := versionAtLeast(tt.maj, tt.minor, tt.pat, tt.wantMaj, tt.wantMin, tt.wantPat)
 			if got != tt.want {
 				t.Errorf("versionAtLeast(%d.%d.%d, %d.%d.%d) = %v, want %v",
-					tt.maj, tt.min, tt.pat, tt.wantMaj, tt.wantMin, tt.wantPat, got, tt.want)
+					tt.maj, tt.minor, tt.pat, tt.wantMaj, tt.wantMin, tt.wantPat, got, tt.want)
 			}
 		})
 	}

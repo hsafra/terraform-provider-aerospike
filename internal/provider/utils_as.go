@@ -716,14 +716,14 @@ func parseBuildVersion(build string) (major, minor, patch int, err error) {
 	return nums[0], nums[1], nums[2], nil
 }
 
-// versionAtLeast reports whether maj.min.patch is greater than or equal to the
+// versionAtLeast reports whether maj.minor.patch is greater than or equal to the
 // wanted version.
-func versionAtLeast(maj, min, pat, wantMaj, wantMin, wantPat int) bool {
+func versionAtLeast(maj, minor, pat, wantMaj, wantMin, wantPat int) bool {
 	if maj != wantMaj {
 		return maj > wantMaj
 	}
-	if min != wantMin {
-		return min > wantMin
+	if minor != wantMin {
+		return minor > wantMin
 	}
 	return pat >= wantPat
 }
@@ -745,11 +745,11 @@ func serverVersionAtLeast(conn *as.Client, major, minor, patch int) (bool, error
 	if err != nil {
 		return false, err
 	}
-	maj, min, pat, err := parseBuildVersion(build)
+	gotMaj, gotMinor, gotPat, err := parseBuildVersion(build)
 	if err != nil {
 		return false, err
 	}
-	return versionAtLeast(maj, min, pat, major, minor, patch), nil
+	return versionAtLeast(gotMaj, gotMinor, gotPat, major, minor, patch), nil
 }
 
 // serverSupportsSetSindex reports whether the cluster supports set indexes
@@ -950,8 +950,8 @@ func createSetSindex(conn *as.Client, namespace, setName, name string) (string, 
 	command := sindexCreateSetCommand(namespace, setName, name)
 	_, err := sendInfoCommand(conn, command)
 	if err != nil {
-		if wrapped := wrapSindexPrivilegeError(err); wrapped != err {
-			return command, wrapped
+		if isSindexPrivilegeError(err) {
+			return command, wrapSindexPrivilegeError(err)
 		}
 		existing, lookupErr := getSindexByName(conn, namespace, name)
 		if lookupErr == nil && existing != nil && isSetIndex(*existing) && existing.Set == setName {
@@ -991,10 +991,7 @@ func deleteSetSindex(conn *as.Client, namespace, setName, name string) (string, 
 	}
 	_, err = sendInfoCommand(conn, command)
 	if err != nil {
-		if wrapped := wrapSindexPrivilegeError(err); wrapped != err {
-			return command, wrapped
-		}
-		return command, err
+		return command, wrapSindexPrivilegeError(err)
 	}
 	if waitErr := waitSindexGone(conn, namespace, name); waitErr != nil {
 		return command, waitErr
