@@ -5,6 +5,7 @@ package provider
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -16,6 +17,9 @@ import (
 
 func testAccSindexPreCheck(t *testing.T) {
 	t.Helper()
+	if os.Getenv(resource.TestEnvVar) == "" {
+		t.Skipf("acceptance tests skipped unless env %s is set", resource.TestEnvVar)
+	}
 	testAccPreCheck(t)
 
 	if !testAccServerSupportsSetSindex(t) {

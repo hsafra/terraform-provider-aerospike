@@ -903,20 +903,44 @@ func wrapSindexPrivilegeError(err error) error {
 }
 
 func waitSindexExists(conn *as.Client, namespace, name string) error {
+	return waitSindexCondition(conn, namespace, name, true, "appear")
+}
+
+func waitSindexGone(conn *as.Client, namespace, name string) error {
+	return waitSindexCondition(conn, namespace, name, false, "disappear")
+}
+
+func waitSindexCondition(conn *as.Client, namespace, name string, wantExists bool, verb string) error {
 	deadline := time.Now().Add(sindexReadyTimeout)
 	for {
 		exists, err := sindexExists(conn, namespace, name)
 		if err != nil {
 			return err
 		}
-		if exists {
+		if exists == wantExists {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out waiting for sindex %q in namespace %q to appear", name, namespace)
+			return fmt.Errorf("timed out waiting for sindex %q in namespace %q to %s", name, namespace, verb)
 		}
 		time.Sleep(sindexReadyPoll)
 	}
+}
+
+// refuseSindexDelete reports why an sindex-list entry must not be deleted by
+// aerospike_sindex: it is not a set index, or it belongs to a different set.
+func refuseSindexDelete(existing sindexEntry, namespace, setName, name string) error {
+	if !isSetIndex(existing) {
+		kind := existing.IndexType
+		if kind == "" {
+			kind = "unknown"
+		}
+		return fmt.Errorf("sindex %q in namespace %q is not a set index (indextype=%s); refusing to delete it", name, namespace, kind)
+	}
+	if existing.Set != setName {
+		return fmt.Errorf("sindex %q in namespace %q belongs to set %q, not %q; refusing to delete it", name, namespace, existing.Set, setName)
+	}
+	return nil
 }
 
 // createSetSindex creates (or converts/renames) a set index via sindex-create.
@@ -943,7 +967,9 @@ func createSetSindex(conn *as.Client, namespace, setName, name string) (string, 
 
 // deleteSetSindex deletes an SMD-owned set index via sindex-delete. It does not
 // send enable-index=false. Config-owned indexes return an error telling the
-// caller to use set_config instead. Missing indexes are a no-op.
+// caller to use set_config instead. Missing indexes are a no-op. Bin or
+// expression indexes that share the name are not deleted. After a successful
+// delete it waits until sindex-exists is false.
 func deleteSetSindex(conn *as.Client, namespace, setName, name string) (string, error) {
 	command := sindexDeleteCommand(namespace, setName, name)
 	existing, err := getSindexByName(conn, namespace, name)
@@ -960,12 +986,18 @@ func deleteSetSindex(conn *as.Client, namespace, setName, name string) (string, 
 		}
 		return command, nil
 	}
+	if guardErr := refuseSindexDelete(*existing, namespace, setName, name); guardErr != nil {
+		return command, guardErr
+	}
 	_, err = sendInfoCommand(conn, command)
 	if err != nil {
 		if wrapped := wrapSindexPrivilegeError(err); wrapped != err {
 			return command, wrapped
 		}
 		return command, err
+	}
+	if waitErr := waitSindexGone(conn, namespace, name); waitErr != nil {
+		return command, waitErr
 	}
 	return command, nil
 }

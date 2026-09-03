@@ -6,6 +6,7 @@ package provider
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -287,6 +288,31 @@ func TestParseSindexImportID(t *testing.T) {
 func TestSindexID(t *testing.T) {
 	if got := sindexID("ns", "set", "idx"); got != "ns/set/idx" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestRefuseSindexDelete(t *testing.T) {
+	setIdx := sindexEntry{IndexType: "set", Mode: "digest", Set: "jobs", Name: "jobs-idx"}
+	if err := refuseSindexDelete(setIdx, "aerospike", "jobs", "jobs-idx"); err != nil {
+		t.Fatalf("set index on matching set should be allowed: %v", err)
+	}
+
+	binIdx := sindexEntry{IndexType: "default", Mode: "secondary", Set: "jobs", Name: "jobs-idx"}
+	err := refuseSindexDelete(binIdx, "aerospike", "jobs", "jobs-idx")
+	if err == nil {
+		t.Fatal("expected error refusing to delete a bin/secondary index")
+	}
+	if !strings.Contains(err.Error(), "not a set index") {
+		t.Fatalf("expected not-a-set-index error, got: %s", err)
+	}
+
+	otherSet := sindexEntry{IndexType: "set", Set: "other", Name: "jobs-idx"}
+	err = refuseSindexDelete(otherSet, "aerospike", "jobs", "jobs-idx")
+	if err == nil {
+		t.Fatal("expected error refusing to delete a set index on a different set")
+	}
+	if !strings.Contains(err.Error(), "belongs to set") {
+		t.Fatalf("expected set-mismatch error, got: %s", err)
 	}
 }
 
