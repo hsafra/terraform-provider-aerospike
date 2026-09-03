@@ -668,3 +668,318 @@ func addXDRDCNamespaceIgnoreSet(conn *as.Client, dc, namespace, setName string) 
 	_, err := sendInfoCommandAllNodes(conn, command)
 	return command, err
 }
+
+const (
+	sindexReadyTimeout = 30 * time.Second
+	sindexReadyPoll    = 200 * time.Millisecond
+	enableIndexParam   = "enable-index"
+)
+
+// minSetSindexVersion is the first Aerospike release that supports set indexes
+// via sindex-create (indextype=set).
+var minSetSindexVersion = [3]int{8, 1, 2}
+
+// sindexEntry is one row from sindex-list.
+type sindexEntry struct {
+	Namespace string
+	Set       string
+	Name      string
+	IndexType string
+	Mode      string
+	State     string
+	Bin       string
+}
+
+// isSetIndex reports whether the entry is a set index (SMD-owned), not a
+// secondary index. 8.1.2+ list output uses indextype=set and/or mode=digest.
+func isSetIndex(e sindexEntry) bool {
+	return e.IndexType == "set" || e.Mode == "digest"
+}
+
+// parseBuildVersion parses an Aerospike build string ("8.1.2.4" or "8.1.2")
+// into major.minor.patch. Extra dotted segments after patch are ignored.
+func parseBuildVersion(build string) (major, minor, patch int, err error) {
+	build = strings.TrimSpace(build)
+	parts := strings.Split(build, ".")
+	if len(parts) < 3 {
+		return 0, 0, 0, fmt.Errorf("invalid build version %q", build)
+	}
+	nums := [3]int{}
+	labels := [3]string{"major", "minor", "patch"}
+	for i := 0; i < 3; i++ {
+		n, convErr := strconv.Atoi(parts[i])
+		if convErr != nil {
+			return 0, 0, 0, fmt.Errorf("invalid build %s in %q: %w", labels[i], build, convErr)
+		}
+		nums[i] = n
+	}
+	return nums[0], nums[1], nums[2], nil
+}
+
+// versionAtLeast reports whether maj.min.patch is greater than or equal to the
+// wanted version.
+func versionAtLeast(maj, min, pat, wantMaj, wantMin, wantPat int) bool {
+	if maj != wantMaj {
+		return maj > wantMaj
+	}
+	if min != wantMin {
+		return min > wantMin
+	}
+	return pat >= wantPat
+}
+
+// getServerBuild returns the cluster build string from the "build" info command.
+func getServerBuild(conn *as.Client) (string, error) {
+	command := "build"
+	result, err := sendInfoCommand(conn, command)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result[command]), nil
+}
+
+// serverVersionAtLeast reports whether the connected cluster's build is at
+// least major.minor.patch.
+func serverVersionAtLeast(conn *as.Client, major, minor, patch int) (bool, error) {
+	build, err := getServerBuild(conn)
+	if err != nil {
+		return false, err
+	}
+	maj, min, pat, err := parseBuildVersion(build)
+	if err != nil {
+		return false, err
+	}
+	return versionAtLeast(maj, min, pat, major, minor, patch), nil
+}
+
+// serverSupportsSetSindex reports whether the cluster supports set indexes
+// via sindex-create (Aerospike 8.1.2+).
+func serverSupportsSetSindex(conn *as.Client) (bool, error) {
+	return serverVersionAtLeast(conn, minSetSindexVersion[0], minSetSindexVersion[1], minSetSindexVersion[2])
+}
+
+// parseSindexList parses an sindex-list info response into entries. Entries are
+// semicolon-separated; each entry is colon-separated key=value pairs.
+func parseSindexList(raw string) []sindexEntry {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.EqualFold(raw, "ok") {
+		return nil
+	}
+	var out []sindexEntry
+	for _, entry := range strings.Split(raw, ";") {
+		kv := parseColonKV(entry)
+		if kv["indexname"] == "" && kv["ns"] == "" && kv["namespace"] == "" {
+			continue
+		}
+		ns := kv["ns"]
+		if ns == "" {
+			ns = kv["namespace"]
+		}
+		out = append(out, sindexEntry{
+			Namespace: ns,
+			Set:       kv["set"],
+			Name:      kv["indexname"],
+			IndexType: kv["indextype"],
+			Mode:      kv["mode"],
+			State:     kv["state"],
+			Bin:       kv["bin"],
+		})
+	}
+	return out
+}
+
+// listSindexes returns all indexes in a namespace from sindex-list.
+func listSindexes(conn *as.Client, namespace string) ([]sindexEntry, error) {
+	command := "sindex-list:namespace=" + namespace
+	result, err := sendInfoCommand(conn, command)
+	if err != nil {
+		return nil, err
+	}
+	return parseSindexList(result[command]), nil
+}
+
+// getSindexByName returns the sindex-list entry for namespace+name, or nil if
+// the index is not listed (including config-owned set indexes).
+func getSindexByName(conn *as.Client, namespace, name string) (*sindexEntry, error) {
+	entries, err := listSindexes(conn, namespace)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		if entries[i].Name == name {
+			return &entries[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// getSetIndex returns the SMD-owned set index for a namespace/set, or nil if
+// none is listed. Presence in sindex-list is the SMD-ownership signal; leftover
+// enable-index=true in sets/ is not.
+func getSetIndex(conn *as.Client, namespace, setName string) (*sindexEntry, error) {
+	entries, err := listSindexes(conn, namespace)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		if isSetIndex(entries[i]) && entries[i].Set == setName {
+			return &entries[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// smdSetIndexSets returns the set names in a namespace that have an SMD-owned
+// set index (appear in sindex-list as a set/digest index).
+func smdSetIndexSets(conn *as.Client, namespace string) (map[string]bool, error) {
+	entries, err := listSindexes(conn, namespace)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool)
+	for _, e := range entries {
+		if isSetIndex(e) && e.Set != "" {
+			out[e.Set] = true
+		}
+	}
+	return out, nil
+}
+
+// sindexExists reports whether sindex-exists is true for namespace+name.
+func sindexExists(conn *as.Client, namespace, name string) (bool, error) {
+	command := "sindex-exists:namespace=" + namespace + ";indexname=" + name
+	result, err := sendInfoCommand(conn, command)
+	if err != nil {
+		return false, err
+	}
+	return strings.EqualFold(strings.TrimSpace(result[command]), "true"), nil
+}
+
+// setIndexConfigOwned reports whether the set has a config-owned set index:
+// enable-index is true in sets/ and the set is not in sindex-list.
+func setIndexConfigOwned(conn *as.Client, namespace, setName string) (bool, error) {
+	smd, err := getSetIndex(conn, namespace, setName)
+	if err != nil {
+		return false, err
+	}
+	if smd != nil {
+		return false, nil
+	}
+	cfg, err := getSetConfig(conn, namespace, setName)
+	if err != nil {
+		return false, err
+	}
+	v, ok := cfg[enableIndexParam]
+	return ok && strings.EqualFold(v, "true"), nil
+}
+
+func sindexCreateSetCommand(namespace, setName, name string) string {
+	return "sindex-create:namespace=" + namespace + ";set=" + setName + ";indexname=" + name + ";indextype=set"
+}
+
+func sindexDeleteCommand(namespace, setName, name string) string {
+	return "sindex-delete:namespace=" + namespace + ";set=" + setName + ";indexname=" + name
+}
+
+// isSindexPrivilegeError reports whether an asinfo error is a missing-privilege
+// / role-violation failure.
+func isSindexPrivilegeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "role violation") ||
+		strings.Contains(s, "not authenticated") ||
+		strings.Contains(s, "error:81") ||
+		strings.Contains(s, "forbidden") ||
+		strings.Contains(s, "not authorized")
+}
+
+func wrapSindexPrivilegeError(err error) error {
+	if err == nil || !isSindexPrivilegeError(err) {
+		return err
+	}
+	return fmt.Errorf("sindex-create/sindex-delete requires the sindex-admin privilege (or data-admin / sys-admin): %w", err)
+}
+
+func waitSindexExists(conn *as.Client, namespace, name string) error {
+	deadline := time.Now().Add(sindexReadyTimeout)
+	for {
+		exists, err := sindexExists(conn, namespace, name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for sindex %q in namespace %q to appear", name, namespace)
+		}
+		time.Sleep(sindexReadyPoll)
+	}
+}
+
+// createSetSindex creates (or converts/renames) a set index via sindex-create.
+// The command is SMD and is sent to a single node. Already-present indexes with
+// the same name on the same set are treated as success.
+func createSetSindex(conn *as.Client, namespace, setName, name string) (string, error) {
+	command := sindexCreateSetCommand(namespace, setName, name)
+	_, err := sendInfoCommand(conn, command)
+	if err != nil {
+		if wrapped := wrapSindexPrivilegeError(err); wrapped != err {
+			return command, wrapped
+		}
+		existing, lookupErr := getSindexByName(conn, namespace, name)
+		if lookupErr == nil && existing != nil && isSetIndex(*existing) && existing.Set == setName {
+			return command, nil
+		}
+		return command, err
+	}
+	if waitErr := waitSindexExists(conn, namespace, name); waitErr != nil {
+		return command, waitErr
+	}
+	return command, nil
+}
+
+// deleteSetSindex deletes an SMD-owned set index via sindex-delete. It does not
+// send enable-index=false. Config-owned indexes return an error telling the
+// caller to use set_config instead. Missing indexes are a no-op.
+func deleteSetSindex(conn *as.Client, namespace, setName, name string) (string, error) {
+	command := sindexDeleteCommand(namespace, setName, name)
+	existing, err := getSindexByName(conn, namespace, name)
+	if err != nil {
+		return command, err
+	}
+	if existing == nil {
+		configOwned, cfgErr := setIndexConfigOwned(conn, namespace, setName)
+		if cfgErr != nil {
+			return command, cfgErr
+		}
+		if configOwned {
+			return command, fmt.Errorf("set index on %s/%s is config-owned; disable it with set_config enable-index=false, not sindex-delete", namespace, setName)
+		}
+		return command, nil
+	}
+	_, err = sendInfoCommand(conn, command)
+	if err != nil {
+		if wrapped := wrapSindexPrivilegeError(err); wrapped != err {
+			return command, wrapped
+		}
+		return command, err
+	}
+	return command, nil
+}
+
+// parseSindexImportID splits "namespace/set/name" into its three parts.
+func parseSindexImportID(id string) (namespace, setName, name string, err error) {
+	parts := strings.Split(id, "/")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return "", "", "", fmt.Errorf("invalid sindex import id %q; expected namespace/set/name", id)
+	}
+	return parts[0], parts[1], parts[2], nil
+}
+
+// sindexID builds the import identifier namespace/set/name.
+func sindexID(namespace, setName, name string) string {
+	return namespace + "/" + setName + "/" + name
+}

@@ -10,7 +10,7 @@ AEROSPIKE_PORT ?= 3000
 # Aerospike version matrix — update these when new patch versions are released
 AEROSPIKE_V6 ?= 6.4.0.7
 AEROSPIKE_V7 ?= 7.2.0.6
-AEROSPIKE_V8 ?= 8.1.1.1
+AEROSPIKE_V8 ?= 8.1.2.4
 
 # Run acceptance tests (no local docker)
 .PHONY: testacc

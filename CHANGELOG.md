@@ -1,3 +1,10 @@
+## 0.5.6
+FEATURES:
+* New `aerospike_sindex` resource for set indexes on Aerospike Database 8.1.2+ (`sindex-create` / `sindex-delete` with `indextype=set`). Creating a set index on a config-owned index (`enable-index`) converts ownership in place — no rebuild. Changing `name` renames the SMD index rather than deleting and recreating it. Destroy uses `sindex-delete` only.
+
+ENHANCEMENTS:
+* `aerospike_namespace_config` keeps `enable-index` in `set_config` for older clusters and config-owned indexes, but treats it as deprecated on 8.1.2+. After SMD conversion, `enable-index=true` is a no-op and `enable-index=false` is rejected so mixed clusters and consumer migrations do not disable or fail. Removing the key from HCL stops managing it and does not send `enable-index=false`.
+
 ## 0.5.5
 BUG FIXES:
 * Fix the client silently managing only a subset of a multi-node cluster. `UseServicesAlternate` was hard-coded to `true`, which forces peer discovery through each node's alternate-access address. When nodes are reached directly (e.g. behind AWS Cloud Map / a load balancer that returns a capped, rotating subset of seed addresses) and advertise no alternate address, peer discovery finds nothing and the client only ever sees the seed nodes — so service/namespace/set/XDR config reads and writes reach just that subset while still reporting success.
