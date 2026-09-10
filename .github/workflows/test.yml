@@ -19,6 +19,11 @@ on:
 permissions:
   contents: read
 
+# Cancel an in-progress run for the same PR when it is updated
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Ensure project builds before running testing matrix
   build:
