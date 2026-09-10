@@ -57,8 +57,10 @@ jobs:
             (echo; echo "Unexpected difference in directories after code generation. Run 'go generate ./...' command and commit."; exit 1)
 
   # Run acceptance tests in a matrix with Terraform CLI versions
+  # Only on pull requests - not on pushes to main after merge
   test:
     name: Terraform Provider Acceptance Tests
+    if: github.event_name == 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
