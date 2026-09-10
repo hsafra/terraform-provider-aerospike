@@ -700,7 +700,7 @@ const (
 	asNamespaceMaxLen         = 31
 	asSetNameMaxLen           = 63
 	asSindexNameMaxLen        = 63
-	sindexIdentForbiddenChars = `:;/=|/`
+	sindexIdentForbiddenChars = ":;/=|\n\r"
 )
 
 // minSetSindexVersion is the first Aerospike release that supports set indexes
@@ -1084,7 +1084,7 @@ func checkSindexIdent(s string, maxLen int, what string) error {
 		return fmt.Errorf("%s must be at most %d characters, got %d", what, maxLen, len(s))
 	}
 	if i := strings.IndexAny(s, sindexIdentForbiddenChars); i >= 0 {
-		return fmt.Errorf("%s must not contain ':', ';', '/', '=', or '|' (found %q)", what, string(s[i]))
+		return fmt.Errorf("%s must not contain ':', ';', '/', '=', '|', or newlines (found %q)", what, string(s[i]))
 	}
 	return nil
 }

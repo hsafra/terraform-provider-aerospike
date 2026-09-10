@@ -61,7 +61,7 @@ func (r *AerospikeSindex) Schema(ctx context.Context, req resource.SchemaRequest
 				},
 			},
 			"namespace": schema.StringAttribute{
-				Description: "Namespace name. At most 31 characters; must not contain ':', ';', '/', '=', or '|'. " +
+				Description: "Namespace name. At most 31 characters; must not contain ':', ';', '/', '=', '|', or newlines. " +
 					"Changing this forces recreation of the resource.",
 				Required: true,
 				Validators: []validator.String{
@@ -72,7 +72,7 @@ func (r *AerospikeSindex) Schema(ctx context.Context, req resource.SchemaRequest
 				},
 			},
 			"set": schema.StringAttribute{
-				Description: "Set name. Required for set indexes. At most 63 characters; must not contain ':', ';', '/', '=', or '|'. " +
+				Description: "Set name. Required for set indexes. At most 63 characters; must not contain ':', ';', '/', '=', '|', or newlines. " +
 					"Changing this forces recreation of the resource.",
 				Required: true,
 				Validators: []validator.String{
@@ -83,7 +83,7 @@ func (r *AerospikeSindex) Schema(ctx context.Context, req resource.SchemaRequest
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Index name (sindex indexname). Required. At most 63 characters; must not contain ':', ';', '/', '=', or '|'. " +
+				Description: "Index name (sindex indexname). Required. At most 63 characters; must not contain ':', ';', '/', '=', '|', or newlines. " +
 					"Changing the name renames the existing set index on the server (no rebuild).",
 				Required: true,
 				Validators: []validator.String{
@@ -345,7 +345,7 @@ type sindexIdentValidator struct {
 }
 
 func (v sindexIdentValidator) Description(_ context.Context) string {
-	return fmt.Sprintf("%s at most %d characters, must not contain ':', ';', '/', '=', or '|'", v.what, v.maxLen)
+	return fmt.Sprintf("%s at most %d characters, must not contain ':', ';', '/', '=', '|', or newlines", v.what, v.maxLen)
 }
 
 func (v sindexIdentValidator) MarkdownDescription(ctx context.Context) string {

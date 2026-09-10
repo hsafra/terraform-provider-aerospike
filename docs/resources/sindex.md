@@ -33,9 +33,9 @@ output "sindex_commands" {
 ### Required
 
 - `index_type` (String) Index type. Currently only "set" is supported. Changing this forces recreation of the resource.
-- `name` (String) Index name (sindex indexname). Required. At most 63 characters; must not contain ':', ';', '/', '=', or '|'. Changing the name renames the existing set index on the server (no rebuild).
-- `namespace` (String) Namespace name. At most 31 characters; must not contain ':', ';', '/', '=', or '|'. Changing this forces recreation of the resource.
-- `set` (String) Set name. Required for set indexes. At most 63 characters; must not contain ':', ';', '/', '=', or '|'. Changing this forces recreation of the resource.
+- `name` (String) Index name (sindex indexname). Required. At most 63 characters; must not contain ':', ';', '/', '=', '|', or newlines. Changing the name renames the existing set index on the server (no rebuild).
+- `namespace` (String) Namespace name. At most 31 characters; must not contain ':', ';', '/', '=', '|', or newlines. Changing this forces recreation of the resource.
+- `set` (String) Set name. Required for set indexes. At most 63 characters; must not contain ':', ';', '/', '=', '|', or newlines. Changing this forces recreation of the resource.
 
 ### Read-Only
 

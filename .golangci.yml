@@ -7,11 +7,11 @@ issues:
   max-same-issues: 0
 
 linters:
+  default: none
   settings:
     errcheck:
       exclude-functions:
         - (*os.File).Close
-  disable-all: true
   enable:
     - durationcheck
     - errcheck

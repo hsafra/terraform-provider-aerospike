@@ -392,6 +392,8 @@ func TestCheckSindexIdent(t *testing.T) {
 		{"x;indexname=evil", asSetNameMaxLen, ";"},
 		{"a=b", asSindexNameMaxLen, "="},
 		{"a|b", asSindexNameMaxLen, "|"},
+		{"idx\nset-config", asSindexNameMaxLen, "newlines"},
+		{"a\rb", asSindexNameMaxLen, "newlines"},
 	}
 	for _, tt := range tests {
 		err := checkSindexIdent(tt.s, tt.maxLen, "ident")
