@@ -3,12 +3,12 @@
 page_title: "aerospike_namespace_config Resource - terraform-provider-aerospike"
 subcategory: ""
 description: |-
-  Manages dynamic Aerospike namespace and set-level configuration parameters. This resource only manages the parameters explicitly declared in the Terraform configuration — all other server parameters are left untouched and will not cause drift. Parameters are validated against the running server before being applied. On destroy, parameters are NOT reset — they persist on the server until changed manually or the server is restarted. On Database 8.1.2+, prefer aerospike_sindex over set_config enable-index for set-index lifecycle. enable-index remains supported; removing it from the configuration does not disable the index.
+  Manages dynamic Aerospike namespace and set-level configuration parameters. This resource only manages the parameters explicitly declared in the Terraform configuration — all other server parameters are left untouched and will not cause drift. Parameters are validated against the running server before being applied. On destroy, parameters are NOT reset — they persist on the server until changed manually or the server is restarted. On Database 8.1.2+, prefer aerospike_sindex over set_config enable-index for set-index lifecycle. enable-index remains supported; removing it from the configuration does not disable the index. Same-apply changes to enable-index and aerospike_sindex on the same set need an explicit depends_on.
 ---
 
 # aerospike_namespace_config (Resource)
 
-Manages dynamic Aerospike namespace and set-level configuration parameters. This resource only manages the parameters explicitly declared in the Terraform configuration — all other server parameters are left untouched and will not cause drift. Parameters are validated against the running server before being applied. On destroy, parameters are NOT reset — they persist on the server until changed manually or the server is restarted. On Database 8.1.2+, prefer aerospike_sindex over set_config enable-index for set-index lifecycle. enable-index remains supported; removing it from the configuration does not disable the index.
+Manages dynamic Aerospike namespace and set-level configuration parameters. This resource only manages the parameters explicitly declared in the Terraform configuration — all other server parameters are left untouched and will not cause drift. Parameters are validated against the running server before being applied. On destroy, parameters are NOT reset — they persist on the server until changed manually or the server is restarted. On Database 8.1.2+, prefer aerospike_sindex over set_config enable-index for set-index lifecycle. enable-index remains supported; removing it from the configuration does not disable the index. Same-apply changes to enable-index and aerospike_sindex on the same set need an explicit depends_on.
 
 ## Example Usage
 
@@ -48,7 +48,7 @@ output "applied_commands" {
 ### Optional
 
 - `params` (Map of String) Namespace-level configuration parameters as key-value string pairs. Keys must be valid Aerospike namespace config parameter names for the connected server version.
-- `set_config` (Map of Map of String) Set-level configuration parameters. The outer map is keyed by set name, and each value is a map of parameter key-value string pairs. enable-index is deprecated on Database 8.1.2+ (use aerospike_sindex); removing a key does not reset it on the server.
+- `set_config` (Map of Map of String) Set-level configuration parameters. The outer map is keyed by set name, and each value is a map of parameter key-value string pairs. enable-index is deprecated on Database 8.1.2+ (use aerospike_sindex); removing a key does not reset it on the server. Same-apply enable-index and aerospike_sindex changes on one set need depends_on.
 
 ### Read-Only
 

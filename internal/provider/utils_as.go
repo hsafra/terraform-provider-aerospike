@@ -14,6 +14,7 @@ import (
 
 	as "github.com/aerospike/aerospike-client-go/v8"
 	astypes "github.com/aerospike/aerospike-client-go/v8/types"
+	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"golang.org/x/sync/errgroup"
@@ -44,13 +45,7 @@ func sendInfoCommand(conn *as.Client, command string) (map[string]string, error)
 	return sendInfoToNode(node, command)
 }
 
-// sendInfoCommandAllNodes sends an asinfo command to ALL nodes in the cluster
-// in parallel. Use this for write commands (set-config, etc.) because Aerospike
-// set-config commands are per-node — they are NOT automatically distributed via
-// SMD to other cluster members. This follows the same approach as asadm, which
-// fans out config commands to every node. Returns the last node's response for
-// API parity; callers currently only check the error.
-func sendInfoCommandAllNodes(conn *as.Client, command string) (map[string]string, error) { //nolint:unparam // callers may use the result in the future
+func sendInfoCommandAllNodeResults(conn *as.Client, command string) ([]map[string]string, error) {
 	nodes := conn.GetNodes()
 	if len(nodes) == 0 {
 		return nil, errors.New("no nodes available in cluster")
@@ -71,7 +66,20 @@ func sendInfoCommandAllNodes(conn *as.Client, command string) (map[string]string
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+	return results, nil
+}
 
+// sendInfoCommandAllNodes sends an asinfo command to ALL nodes in the cluster
+// in parallel. Use this for write commands (set-config, etc.) because Aerospike
+// set-config commands are per-node — they are NOT automatically distributed via
+// SMD to other cluster members. This follows the same approach as asadm, which
+// fans out config commands to every node. Returns the last node's response for
+// API parity; callers currently only check the error.
+func sendInfoCommandAllNodes(conn *as.Client, command string) (map[string]string, error) { //nolint:unparam // callers may use the result in the future
+	results, err := sendInfoCommandAllNodeResults(conn, command)
+	if err != nil {
+		return nil, err
+	}
 	return results[len(results)-1], nil
 }
 
@@ -179,6 +187,21 @@ func stringMapFromTypesMap(m types.Map) map[string]string {
 		if s, ok := v.(types.String); ok && !s.IsNull() && !s.IsUnknown() {
 			out[k] = s.ValueString()
 		}
+	}
+	return out
+}
+
+func nestedStringMapFromTypesMap(m types.Map) map[string]map[string]string {
+	out := make(map[string]map[string]string)
+	if m.IsNull() || m.IsUnknown() {
+		return out
+	}
+	for k, v := range m.Elements() {
+		inner, ok := v.(types.Map)
+		if !ok {
+			continue
+		}
+		out[k] = stringMapFromTypesMap(inner)
 	}
 	return out
 }
@@ -673,11 +696,16 @@ const (
 	sindexReadyTimeout = 30 * time.Second
 	sindexReadyPoll    = 200 * time.Millisecond
 	enableIndexParam   = "enable-index"
+
+	asNamespaceMaxLen         = 31
+	asSetNameMaxLen           = 63
+	asSindexNameMaxLen        = 63
+	sindexIdentForbiddenChars = `:;/=|/`
 )
 
 // minSetSindexVersion is the first Aerospike release that supports set indexes
 // via sindex-create (indextype=set).
-var minSetSindexVersion = [3]int{8, 1, 2}
+var minSetSindexVersion = version.Must(version.NewVersion("8.1.2"))
 
 // sindexEntry is one row from sindex-list.
 type sindexEntry struct {
@@ -696,66 +724,74 @@ func isSetIndex(e sindexEntry) bool {
 	return e.IndexType == "set" || e.Mode == "digest"
 }
 
-// parseBuildVersion parses an Aerospike build string ("8.1.2.4" or "8.1.2")
-// into major.minor.patch. Extra dotted segments after patch are ignored.
-func parseBuildVersion(build string) (major, minor, patch int, err error) {
-	build = strings.TrimSpace(build)
-	parts := strings.Split(build, ".")
-	if len(parts) < 3 {
-		return 0, 0, 0, fmt.Errorf("invalid build version %q", build)
+func getServerBuildsAllNodes(conn *as.Client) ([]string, error) {
+	results, err := sendInfoCommandAllNodeResults(conn, "build")
+	if err != nil {
+		return nil, err
 	}
-	nums := [3]int{}
-	labels := [3]string{"major", "minor", "patch"}
-	for i := 0; i < 3; i++ {
-		n, convErr := strconv.Atoi(parts[i])
-		if convErr != nil {
-			return 0, 0, 0, fmt.Errorf("invalid build %s in %q: %w", labels[i], build, convErr)
+	builds := make([]string, 0, len(results))
+	for _, result := range results {
+		b := strings.TrimSpace(result["build"])
+		if b == "" {
+			return nil, errors.New("empty build version from a cluster node")
 		}
-		nums[i] = n
+		builds = append(builds, b)
 	}
-	return nums[0], nums[1], nums[2], nil
+	return builds, nil
 }
 
-// versionAtLeast reports whether maj.minor.patch is greater than or equal to the
-// wanted version.
-func versionAtLeast(maj, minor, pat, wantMaj, wantMin, wantPat int) bool {
-	if maj != wantMaj {
-		return maj > wantMaj
-	}
-	if minor != wantMin {
-		return minor > wantMin
-	}
-	return pat >= wantPat
-}
-
-// getServerBuild returns the cluster build string from the "build" info command.
-func getServerBuild(conn *as.Client) (string, error) {
-	command := "build"
-	result, err := sendInfoCommand(conn, command)
+func buildAtLeast(build string, min *version.Version) (bool, error) {
+	v, err := version.NewVersion(strings.TrimSpace(build))
 	if err != nil {
-		return "", err
+		return false, fmt.Errorf("invalid build version %q: %w", build, err)
 	}
-	return strings.TrimSpace(result[command]), nil
+	return v.GreaterThanOrEqual(min), nil
 }
 
-// serverVersionAtLeast reports whether the connected cluster's build is at
-// least major.minor.patch.
-func serverVersionAtLeast(conn *as.Client, major, minor, patch int) (bool, error) {
-	build, err := getServerBuild(conn)
-	if err != nil {
-		return false, err
+func minBuildAtLeast(builds []string, min *version.Version) (bool, error) {
+	if len(builds) == 0 {
+		return false, errors.New("no build versions reported")
 	}
-	gotMaj, gotMinor, gotPat, err := parseBuildVersion(build)
+	var lowest *version.Version
+	for _, b := range builds {
+		v, err := version.NewVersion(strings.TrimSpace(b))
+		if err != nil {
+			return false, fmt.Errorf("invalid build version %q: %w", b, err)
+		}
+		if lowest == nil || v.LessThan(lowest) {
+			lowest = v
+		}
+	}
+	return lowest.GreaterThanOrEqual(min), nil
+}
+
+func clusterSupportsSetSindex(conn *as.Client) (bool, error) {
+	builds, err := getServerBuildsAllNodes(conn)
 	if err != nil {
 		return false, err
 	}
-	return versionAtLeast(gotMaj, gotMinor, gotPat, major, minor, patch), nil
+	return minBuildAtLeast(builds, minSetSindexVersion)
 }
 
-// serverSupportsSetSindex reports whether the cluster supports set indexes
-// via sindex-create (Aerospike 8.1.2+).
-func serverSupportsSetSindex(conn *as.Client) (bool, error) {
-	return serverVersionAtLeast(conn, minSetSindexVersion[0], minSetSindexVersion[1], minSetSindexVersion[2])
+func serverSupportsSetSindex(conn *asConnection) (bool, error) {
+	if conn == nil {
+		return false, errors.New("no aerospike connection")
+	}
+	conn.setSindexMu.Lock()
+	defer conn.setSindexMu.Unlock()
+	if conn.setSindexCached {
+		return conn.setSindexOK, nil
+	}
+	if conn.client == nil {
+		return false, errors.New("no aerospike connection")
+	}
+	ok, err := clusterSupportsSetSindex(conn.client)
+	if err != nil {
+		return false, err
+	}
+	conn.setSindexOK = ok
+	conn.setSindexCached = true
+	return ok, nil
 }
 
 // parseSindexList parses an sindex-list info response into entries. Entries are
@@ -845,14 +881,47 @@ func smdSetIndexSets(conn *as.Client, namespace string) (map[string]bool, error)
 	return out, nil
 }
 
-// sindexExists reports whether sindex-exists is true for namespace+name.
+func sindexExistsCommand(namespace, name string) string {
+	return "sindex-exists:namespace=" + namespace + ";indexname=" + name
+}
+
+func sindexExistsTrue(raw string) bool {
+	return strings.EqualFold(strings.TrimSpace(raw), "true")
+}
+
+func sindexExistsConsensus(exists []bool) (allTrue, allFalse bool, err error) {
+	if len(exists) == 0 {
+		return false, false, errors.New("no nodes available in cluster")
+	}
+	nTrue := 0
+	for _, e := range exists {
+		if e {
+			nTrue++
+		}
+	}
+	return nTrue == len(exists), nTrue == 0, nil
+}
+
 func sindexExists(conn *as.Client, namespace, name string) (bool, error) {
-	command := "sindex-exists:namespace=" + namespace + ";indexname=" + name
+	command := sindexExistsCommand(namespace, name)
 	result, err := sendInfoCommand(conn, command)
 	if err != nil {
 		return false, err
 	}
-	return strings.EqualFold(strings.TrimSpace(result[command]), "true"), nil
+	return sindexExistsTrue(result[command]), nil
+}
+
+func sindexExistsAllNodes(conn *as.Client, namespace, name string) (allTrue, allFalse bool, err error) {
+	command := sindexExistsCommand(namespace, name)
+	results, err := sendInfoCommandAllNodeResults(conn, command)
+	if err != nil {
+		return false, false, err
+	}
+	exists := make([]bool, len(results))
+	for i, result := range results {
+		exists[i] = sindexExistsTrue(result[command])
+	}
+	return sindexExistsConsensus(exists)
 }
 
 // setIndexConfigOwned reports whether the set has a config-owned set index:
@@ -881,9 +950,7 @@ func sindexDeleteCommand(namespace, setName, name string) string {
 	return "sindex-delete:namespace=" + namespace + ";set=" + setName + ";indexname=" + name
 }
 
-// isSindexPrivilegeError reports whether an asinfo error is a missing-privilege
-// / role-violation failure.
-func isSindexPrivilegeError(err error) bool {
+func isPrivError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -896,7 +963,7 @@ func isSindexPrivilegeError(err error) bool {
 }
 
 func wrapSindexPrivilegeError(err error) error {
-	if err == nil || !isSindexPrivilegeError(err) {
+	if err == nil || !isPrivError(err) {
 		return err
 	}
 	return fmt.Errorf("sindex-create/sindex-delete requires the sindex-admin privilege (or data-admin / sys-admin): %w", err)
@@ -913,18 +980,28 @@ func waitSindexGone(conn *as.Client, namespace, name string) error {
 func waitSindexCondition(conn *as.Client, namespace, name string, wantExists bool, verb string) error {
 	deadline := time.Now().Add(sindexReadyTimeout)
 	for {
-		exists, err := sindexExists(conn, namespace, name)
+		allTrue, allFalse, err := sindexExistsAllNodes(conn, namespace, name)
 		if err != nil {
 			return err
 		}
-		if exists == wantExists {
+		if wantExists && allTrue {
+			return nil
+		}
+		if !wantExists && allFalse {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out waiting for sindex %q in namespace %q to %s", name, namespace, verb)
+			return fmt.Errorf("timed out waiting for sindex %q in namespace %q to %s on all nodes", name, namespace, verb)
 		}
 		time.Sleep(sindexReadyPoll)
 	}
+}
+
+func refuseSindexCreateRename(existing *sindexEntry, namespace, setName, name string) error {
+	if existing == nil || existing.Name == name {
+		return nil
+	}
+	return fmt.Errorf("set %s/%s already has SMD-owned set index %q; create would rename it — import that index or change name on the existing aerospike_sindex resource", namespace, setName, existing.Name)
 }
 
 // refuseSindexDelete reports why an sindex-list entry must not be deleted by
@@ -950,7 +1027,7 @@ func createSetSindex(conn *as.Client, namespace, setName, name string) (string, 
 	command := sindexCreateSetCommand(namespace, setName, name)
 	_, err := sendInfoCommand(conn, command)
 	if err != nil {
-		if isSindexPrivilegeError(err) {
+		if isPrivError(err) {
 			return command, wrapSindexPrivilegeError(err)
 		}
 		existing, lookupErr := getSindexByName(conn, namespace, name)
@@ -999,11 +1076,33 @@ func deleteSetSindex(conn *as.Client, namespace, setName, name string) (string, 
 	return command, nil
 }
 
+func checkSindexIdent(s string, maxLen int, what string) error {
+	if s == "" {
+		return fmt.Errorf("%s must not be empty", what)
+	}
+	if len(s) > maxLen {
+		return fmt.Errorf("%s must be at most %d characters, got %d", what, maxLen, len(s))
+	}
+	if i := strings.IndexAny(s, sindexIdentForbiddenChars); i >= 0 {
+		return fmt.Errorf("%s must not contain ':', ';', '/', '=', or '|' (found %q)", what, string(s[i]))
+	}
+	return nil
+}
+
 // parseSindexImportID splits "namespace/set/name" into its three parts.
 func parseSindexImportID(id string) (namespace, setName, name string, err error) {
 	parts := strings.Split(id, "/")
-	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+	if len(parts) != 3 {
 		return "", "", "", fmt.Errorf("invalid sindex import id %q; expected namespace/set/name", id)
+	}
+	if err := checkSindexIdent(parts[0], asNamespaceMaxLen, "namespace"); err != nil {
+		return "", "", "", fmt.Errorf("invalid sindex import id %q: %w", id, err)
+	}
+	if err := checkSindexIdent(parts[1], asSetNameMaxLen, "set"); err != nil {
+		return "", "", "", fmt.Errorf("invalid sindex import id %q: %w", id, err)
+	}
+	if err := checkSindexIdent(parts[2], asSindexNameMaxLen, "index name"); err != nil {
+		return "", "", "", fmt.Errorf("invalid sindex import id %q: %w", id, err)
 	}
 	return parts[0], parts[1], parts[2], nil
 }

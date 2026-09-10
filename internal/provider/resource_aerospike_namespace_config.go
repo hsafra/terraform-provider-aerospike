@@ -48,7 +48,8 @@ func (r *AerospikeNamespaceConfig) Schema(ctx context.Context, req resource.Sche
 			"Parameters are validated against the running server before being applied. " +
 			"On destroy, parameters are NOT reset — they persist on the server until changed manually or the server is restarted. " +
 			"On Database 8.1.2+, prefer aerospike_sindex over set_config enable-index for set-index lifecycle. " +
-			"enable-index remains supported; removing it from the configuration does not disable the index.",
+			"enable-index remains supported; removing it from the configuration does not disable the index. " +
+			"Same-apply changes to enable-index and aerospike_sindex on the same set need an explicit depends_on.",
 
 		Attributes: map[string]schema.Attribute{
 			"namespace": schema.StringAttribute{
@@ -68,7 +69,8 @@ func (r *AerospikeNamespaceConfig) Schema(ctx context.Context, req resource.Sche
 				Description: "Set-level configuration parameters. The outer map is keyed by set name, " +
 					"and each value is a map of parameter key-value string pairs. " +
 					"enable-index is deprecated on Database 8.1.2+ (use aerospike_sindex); " +
-					"removing a key does not reset it on the server.",
+					"removing a key does not reset it on the server. " +
+					"Same-apply enable-index and aerospike_sindex changes on one set need depends_on.",
 				Optional:    true,
 				ElementType: types.MapType{ElemType: types.StringType},
 			},
@@ -210,13 +212,7 @@ func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRe
 		}
 
 		updatedSetConfig := make(map[string]map[string]string)
-		for setName, innerVal := range data.SetConfig.Elements() {
-			innerMap, ok := innerVal.(types.Map)
-			if !ok {
-				continue
-			}
-
-			priorSetState := stringMapFromTypesMap(innerMap)
+		for setName, priorSetState := range nestedStringMapFromTypesMap(data.SetConfig) {
 			serverSetConfig, setDivergences, err := getSetConfigAllNodes(r.asConn.client, namespace, setName, priorSetState)
 			if err != nil {
 				resp.Diagnostics.AddError("Error reading set config",
@@ -229,22 +225,14 @@ func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRe
 				fmt.Sprintf("set %q in namespace %q", setName, namespace))
 
 			setParams := make(map[string]string)
-			for key, val := range innerMap.Elements() {
-				s, ok := val.(types.String)
-				if !ok {
-					continue
-				}
-				// Keep declared enable-index when SMD owns the index so leftover
-				// sets/ values do not cause perpetual drift.
-				if key == enableIndexParam && smdOwned[setName] && !s.IsNull() && !s.IsUnknown() {
-					setParams[key] = s.ValueString()
+			for key, val := range priorSetState {
+				if key == enableIndexParam && smdOwned[setName] {
+					setParams[key] = val
 					continue
 				}
 				if serverVal, found := serverSetConfig[key]; found {
 					setParams[key] = serverVal
 				}
-				// If key is not in server response, the set may not exist yet
-				// on the server — omit the key so Terraform detects the drift.
 			}
 			updatedSetConfig[setName] = setParams
 		}
@@ -398,10 +386,15 @@ func (r *AerospikeNamespaceConfig) applyNamespaceParams(ctx context.Context, nam
 func (r *AerospikeNamespaceConfig) applySetParams(ctx context.Context, namespace string, setConfig types.Map, infoCommands *[]string) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	smdOwned, supportsSetSindex, smdDiags := r.smdOwnedSets(namespace, setConfig)
-	diags.Append(smdDiags...)
-	if diags.HasError() {
-		return diags
+	var supportsSetSindex bool
+	if setConfigHasParam(setConfig, enableIndexParam) {
+		ok, err := serverSupportsSetSindex(r.asConn)
+		if err != nil {
+			diags.AddError("Error reading Aerospike version",
+				fmt.Sprintf("Could not determine server version: %s", err.Error()))
+			return diags
+		}
+		supportsSetSindex = ok
 	}
 
 	for setName, innerVal := range setConfig.Elements() {
@@ -443,7 +436,17 @@ func (r *AerospikeNamespaceConfig) applySetParams(ctx context.Context, namespace
 			}
 
 			if key == enableIndexParam {
-				skip, skipDiags := skipEnableIndex(namespace, setName, strVal.ValueString(), supportsSetSindex, smdOwned[setName])
+				smdOwned := false
+				if supportsSetSindex {
+					entry, err := getSetIndex(r.asConn.client, namespace, setName)
+					if err != nil {
+						diags.AddError("Error reading sindex list",
+							fmt.Sprintf("Could not list sindexes for namespace %q to detect SMD-owned set indexes: %s", namespace, err.Error()))
+						return diags
+					}
+					smdOwned = entry != nil
+				}
+				skip, skipDiags := skipEnableIndex(namespace, setName, strVal.ValueString(), supportsSetSindex, smdOwned)
 				diags.Append(skipDiags...)
 				if diags.HasError() {
 					return diags
@@ -470,12 +473,8 @@ func (r *AerospikeNamespaceConfig) applySetParams(ctx context.Context, namespace
 }
 
 func setConfigHasParam(setConfig types.Map, key string) bool {
-	for _, innerVal := range setConfig.Elements() {
-		innerMap, ok := innerVal.(types.Map)
-		if !ok {
-			continue
-		}
-		if _, has := innerMap.Elements()[key]; has {
+	for _, inner := range nestedStringMapFromTypesMap(setConfig) {
+		if _, has := inner[key]; has {
 			return true
 		}
 	}
@@ -490,7 +489,7 @@ func (r *AerospikeNamespaceConfig) smdOwnedSets(namespace string, setConfig type
 		return owned, false, diags
 	}
 
-	ok, err := serverSupportsSetSindex(r.asConn.client)
+	ok, err := serverSupportsSetSindex(r.asConn)
 	if err != nil {
 		diags.AddError("Error reading Aerospike version",
 			fmt.Sprintf("Could not determine server version: %s", err.Error()))
@@ -521,7 +520,8 @@ func skipEnableIndex(namespace, setName, value string, supports, smdOwned bool) 
 		if strings.EqualFold(value, "false") {
 			diags.AddError("Cannot disable SMD-owned set index via enable-index",
 				fmt.Sprintf("Set %q in namespace %q already has an SMD-owned set index. "+
-					"Destroy the aerospike_sindex resource instead of setting enable-index=false.",
+					"Destroy the aerospike_sindex resource instead of setting enable-index=false. "+
+					"If this apply also destroys that aerospike_sindex, add depends_on so the sindex is destroyed first.",
 					setName, namespace))
 			return true, diags
 		}
@@ -541,30 +541,12 @@ func skipEnableIndex(namespace, setName, value string, supports, smdOwned bool) 
 // warnRemovedSetConfig emits warnings when set_config sets or keys are dropped
 // from HCL. Removed parameters are not reset on the server.
 func warnRemovedSetConfig(diags *diag.Diagnostics, stateCfg, planCfg types.Map, namespace string) {
-	if stateCfg.IsNull() {
+	if stateCfg.IsNull() || planCfg.IsUnknown() {
 		return
 	}
 
-	planSets := make(map[string]map[string]struct{})
-	if !planCfg.IsNull() && !planCfg.IsUnknown() {
-		for setName, innerVal := range planCfg.Elements() {
-			innerMap, ok := innerVal.(types.Map)
-			if !ok {
-				continue
-			}
-			keys := make(map[string]struct{})
-			for k := range innerMap.Elements() {
-				keys[k] = struct{}{}
-			}
-			planSets[setName] = keys
-		}
-	}
-
-	for setName, innerVal := range stateCfg.Elements() {
-		innerMap, ok := innerVal.(types.Map)
-		if !ok {
-			continue
-		}
+	planSets := nestedStringMapFromTypesMap(planCfg)
+	for setName, stateKeys := range nestedStringMapFromTypesMap(stateCfg) {
 		planKeys, setStillPresent := planSets[setName]
 		if !setStillPresent {
 			diags.AddWarning("Set configuration removed from configuration",
@@ -572,7 +554,7 @@ func warnRemovedSetConfig(diags *diag.Diagnostics, stateCfg, planCfg types.Map, 
 					"They retain their current values in namespace %q.", setName, namespace))
 			continue
 		}
-		for key := range innerMap.Elements() {
+		for key := range stateKeys {
 			if _, exists := planKeys[key]; !exists {
 				diags.AddWarning("Set parameter removed from configuration",
 					fmt.Sprintf("Parameter %q was removed from set %q in the Terraform configuration but cannot be unset on the server. "+

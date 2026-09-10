@@ -3,26 +3,27 @@
 page_title: "aerospike_sindex Resource - terraform-provider-aerospike"
 subcategory: ""
 description: |-
-  Manages Aerospike set indexes on Database 8.1.2+ via sindex-create / sindex-delete. Requires the sindex-admin privilege (or data-admin / sys-admin). Creating a set index on a config-owned (enable-index) index converts ownership in place with no rebuild. Destroy uses sindex-delete only. Changing name renames the index in place.
+  Manages Aerospike set indexes on Database 8.1.2+ via sindex-create / sindex-delete. Requires the sindex-admin privilege (or data-admin / sys-admin). Creating a set index on a config-owned (enable-index) index converts ownership in place with no rebuild. Destroy uses sindex-delete only. Changing name renames the index in place. Same-apply changes to aerospike_sindex and set_config enable-index on one set need an explicit depends_on.
 ---
 
 # aerospike_sindex (Resource)
 
-Manages Aerospike set indexes on Database 8.1.2+ via sindex-create / sindex-delete. Requires the sindex-admin privilege (or data-admin / sys-admin). Creating a set index on a config-owned (enable-index) index converts ownership in place with no rebuild. Destroy uses sindex-delete only. Changing name renames the index in place.
+Manages Aerospike set indexes on Database 8.1.2+ via sindex-create / sindex-delete. Requires the sindex-admin privilege (or data-admin / sys-admin). Creating a set index on a config-owned (enable-index) index converts ownership in place with no rebuild. Destroy uses sindex-delete only. Changing name renames the index in place. Same-apply changes to aerospike_sindex and set_config enable-index on one set need an explicit depends_on.
 
 ## Example Usage
 
 ```terraform
 # Manage a set index (Aerospike Database 8.1.2+)
-resource "aerospike_sindex" "jobs" {
+# Same-apply enable-index changes on this set need depends_on vs aerospike_namespace_config.
+resource "aerospike_sindex" "set1" {
   namespace  = "aerospike"
-  set        = "shuttlex_jobs"
-  name       = "shuttlex_jobs-set-idx"
+  set        = "set1"
+  name       = "set1-idx"
   index_type = "set"
 }
 
 output "sindex_commands" {
-  value = aerospike_sindex.jobs.info_commands
+  value = aerospike_sindex.set1.info_commands
 }
 ```
 
@@ -32,9 +33,9 @@ output "sindex_commands" {
 ### Required
 
 - `index_type` (String) Index type. Currently only "set" is supported. Changing this forces recreation of the resource.
-- `name` (String) Index name (sindex indexname). Required. At most 63 characters; colon and semicolon are not allowed. Changing the name renames the existing set index on the server (no rebuild).
-- `namespace` (String) Namespace name. Changing this forces recreation of the resource.
-- `set` (String) Set name. Required for set indexes. Changing this forces recreation of the resource.
+- `name` (String) Index name (sindex indexname). Required. At most 63 characters; must not contain ':', ';', '/', '=', or '|'. Changing the name renames the existing set index on the server (no rebuild).
+- `namespace` (String) Namespace name. At most 31 characters; must not contain ':', ';', '/', '=', or '|'. Changing this forces recreation of the resource.
+- `set` (String) Set name. Required for set indexes. At most 63 characters; must not contain ':', ';', '/', '=', or '|'. Changing this forces recreation of the resource.
 
 ### Read-Only
 
@@ -48,5 +49,5 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-terraform import aerospike_sindex.jobs aerospike/shuttlex_jobs/shuttlex_jobs-set-idx
+terraform import aerospike_sindex.set1 aerospike/set1/set1-idx
 ```

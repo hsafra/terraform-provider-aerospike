@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	as "github.com/aerospike/aerospike-client-go/v8"
@@ -58,6 +59,9 @@ type AerospikeTLSConfigModel struct {
 type asConnection struct {
 	client               *as.Client
 	serviceConfigClaimed int32 // atomic; enforces singleton aerospike_service_config
+	setSindexMu          sync.Mutex
+	setSindexCached      bool
+	setSindexOK          bool
 }
 
 func (p *AerospikeProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {

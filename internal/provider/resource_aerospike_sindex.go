@@ -6,7 +6,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"regexp"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -50,7 +49,8 @@ func (r *AerospikeSindex) Schema(ctx context.Context, req resource.SchemaRequest
 		Description: "Manages Aerospike set indexes on Database 8.1.2+ via sindex-create / sindex-delete. " +
 			"Requires the sindex-admin privilege (or data-admin / sys-admin). " +
 			"Creating a set index on a config-owned (enable-index) index converts ownership in place with no rebuild. " +
-			"Destroy uses sindex-delete only. Changing name renames the index in place.",
+			"Destroy uses sindex-delete only. Changing name renames the index in place. " +
+			"Same-apply changes to aerospike_sindex and set_config enable-index on one set need an explicit depends_on.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -61,29 +61,33 @@ func (r *AerospikeSindex) Schema(ctx context.Context, req resource.SchemaRequest
 				},
 			},
 			"namespace": schema.StringAttribute{
-				Description: "Namespace name. Changing this forces recreation of the resource.",
-				Required:    true,
+				Description: "Namespace name. At most 31 characters; must not contain ':', ';', '/', '=', or '|'. " +
+					"Changing this forces recreation of the resource.",
+				Required: true,
+				Validators: []validator.String{
+					sindexIdentValidator{maxLen: asNamespaceMaxLen, what: "namespace"},
+				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"set": schema.StringAttribute{
-				Description: "Set name. Required for set indexes. Changing this forces recreation of the resource.",
-				Required:    true,
+				Description: "Set name. Required for set indexes. At most 63 characters; must not contain ':', ';', '/', '=', or '|'. " +
+					"Changing this forces recreation of the resource.",
+				Required: true,
+				Validators: []validator.String{
+					sindexIdentValidator{maxLen: asSetNameMaxLen, what: "set"},
+				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Index name (sindex indexname). Required. At most 63 characters; colon and semicolon are not allowed. " +
+				Description: "Index name (sindex indexname). Required. At most 63 characters; must not contain ':', ';', '/', '=', or '|'. " +
 					"Changing the name renames the existing set index on the server (no rebuild).",
 				Required: true,
 				Validators: []validator.String{
-					stringvalidator.LengthBetween(1, 63),
-					stringvalidator.RegexMatches(
-						regexp.MustCompile(`^[^:;]+$`),
-						"index name must not contain ':' or ';'",
-					),
+					sindexIdentValidator{maxLen: asSindexNameMaxLen, what: "index name"},
 				},
 			},
 			"index_type": schema.StringAttribute{
@@ -165,6 +169,17 @@ func (r *AerospikeSindex) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
+	existing, err := getSetIndex(r.asConn.client, namespace, setName)
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading set index",
+			fmt.Sprintf("Could not list sindexes for namespace %q: %s", namespace, err.Error()))
+		return
+	}
+	if err := refuseSindexCreateRename(existing, namespace, setName, name); err != nil {
+		resp.Diagnostics.AddError("Set index already exists", err.Error())
+		return
+	}
+
 	command, err := createSetSindex(r.asConn.client, namespace, setName, name)
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating set index",
@@ -195,6 +210,12 @@ func (r *AerospikeSindex) Read(ctx context.Context, req resource.ReadRequest, re
 
 	namespace := data.Namespace.ValueString()
 	name := data.Name.ValueString()
+
+	if !namespaceExists(r.asConn.client, namespace) {
+		resp.State.RemoveResource(ctx)
+		tflog.Trace(ctx, "namespace "+namespace+" no longer exists, removing set index from state")
+		return
+	}
 
 	entry, err := getSindexByName(r.asConn.client, namespace, name)
 	if err != nil {
@@ -303,7 +324,7 @@ func (r *AerospikeSindex) ImportState(ctx context.Context, req resource.ImportSt
 }
 
 func (r *AerospikeSindex) requireSetSindexSupport(diags *diag.Diagnostics) bool {
-	ok, err := serverSupportsSetSindex(r.asConn.client)
+	ok, err := serverSupportsSetSindex(r.asConn)
 	if err != nil {
 		diags.AddError("Error reading Aerospike version",
 			fmt.Sprintf("Could not determine server version: %s", err.Error()))
@@ -316,4 +337,26 @@ func (r *AerospikeSindex) requireSetSindexSupport(diags *diag.Diagnostics) bool 
 		return false
 	}
 	return true
+}
+
+type sindexIdentValidator struct {
+	maxLen int
+	what   string
+}
+
+func (v sindexIdentValidator) Description(_ context.Context) string {
+	return fmt.Sprintf("%s at most %d characters, must not contain ':', ';', '/', '=', or '|'", v.what, v.maxLen)
+}
+
+func (v sindexIdentValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v sindexIdentValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if err := checkSindexIdent(req.ConfigValue.ValueString(), v.maxLen, v.what); err != nil {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid "+v.what, err.Error())
+	}
 }

@@ -44,7 +44,7 @@ func testAccServerSupportsSetSindex(t *testing.T) bool {
 	}
 	defer client.Close()
 
-	ok, err := serverSupportsSetSindex(client)
+	ok, err := clusterSupportsSetSindex(client)
 	if err != nil {
 		t.Fatalf("Unable to read Aerospike version: %s", err)
 	}
@@ -392,6 +392,31 @@ func TestAccAerospikeSindex_rename(t *testing.T) {
 	})
 }
 
+func TestAccAerospikeSindex_createDoesNotRename(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccSindexPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeSindexDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccSindexConfig("sidx_norename", "sidx_norename-old"),
+				Check:  testAccCheckSetSindexPresent("aerospike", "sidx_norename", "sidx_norename-old"),
+			},
+			{
+				Config: testAccSindexConfig("sidx_norename", "sidx_norename-old") + `
+resource "aerospike_sindex" "other" {
+  namespace  = "aerospike"
+  set        = "sidx_norename"
+  name       = "sidx_norename-new"
+  index_type = "set"
+}
+`,
+				ExpectError: regexp.MustCompile("already has SMD-owned set index"),
+			},
+		},
+	})
+}
+
 func TestAccAerospikeSindex_idempotentReapply(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { testAccSindexPreCheck(t) },
@@ -578,7 +603,7 @@ func TestAccCreateSetSindexPrivilegeDenied(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected privilege error creating set index")
 	}
-	if !isSindexPrivilegeError(err) && !strings.Contains(strings.ToLower(err.Error()), "sindex-admin") {
+	if !isPrivError(err) && !strings.Contains(strings.ToLower(err.Error()), "sindex-admin") {
 		t.Fatalf("expected privilege / sindex-admin error, got: %s", err)
 	}
 }

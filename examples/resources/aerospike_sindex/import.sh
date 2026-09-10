@@ -1,1 +1,1 @@
-terraform import aerospike_sindex.jobs aerospike/shuttlex_jobs/shuttlex_jobs-set-idx
+terraform import aerospike_sindex.set1 aerospike/set1/set1-idx

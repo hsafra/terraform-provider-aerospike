@@ -1,11 +1,12 @@
 # Manage a set index (Aerospike Database 8.1.2+)
-resource "aerospike_sindex" "jobs" {
+# Same-apply enable-index changes on this set need depends_on vs aerospike_namespace_config.
+resource "aerospike_sindex" "set1" {
   namespace  = "aerospike"
-  set        = "shuttlex_jobs"
-  name       = "shuttlex_jobs-set-idx"
+  set        = "set1"
+  name       = "set1-idx"
   index_type = "set"
 }
 
 output "sindex_commands" {
-  value = aerospike_sindex.jobs.info_commands
+  value = aerospike_sindex.set1.info_commands
 }
