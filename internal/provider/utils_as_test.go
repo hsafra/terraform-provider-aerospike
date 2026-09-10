@@ -413,6 +413,22 @@ func TestSindexID(t *testing.T) {
 	}
 }
 
+func TestSindexPlanID(t *testing.T) {
+	got := sindexPlanID(types.StringValue("ns"), types.StringValue("set"), types.StringValue("idx"))
+	if got.ValueString() != "ns/set/idx" {
+		t.Errorf("known parts: got %q", got.ValueString())
+	}
+	if !sindexPlanID(types.StringValue("ns"), types.StringValue("set"), types.StringUnknown()).IsUnknown() {
+		t.Error("unknown name should yield unknown id")
+	}
+	if !sindexPlanID(types.StringUnknown(), types.StringValue("set"), types.StringValue("idx")).IsUnknown() {
+		t.Error("unknown namespace should yield unknown id")
+	}
+	if !sindexPlanID(types.StringValue("ns"), types.StringUnknown(), types.StringValue("idx")).IsUnknown() {
+		t.Error("unknown set should yield unknown id")
+	}
+}
+
 func TestRefuseSindexCreateRename(t *testing.T) {
 	if err := refuseSindexCreateRename(nil, "aerospike", "set1", "new-idx"); err != nil {
 		t.Fatalf("nil existing: %v", err)

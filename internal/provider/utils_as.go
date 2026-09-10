@@ -1111,3 +1111,10 @@ func parseSindexImportID(id string) (namespace, setName, name string, err error)
 func sindexID(namespace, setName, name string) string {
 	return namespace + "/" + setName + "/" + name
 }
+
+func sindexPlanID(namespace, setName, name types.String) types.String {
+	if namespace.IsUnknown() || setName.IsUnknown() || name.IsUnknown() {
+		return types.StringUnknown()
+	}
+	return types.StringValue(sindexID(namespace.ValueString(), setName.ValueString(), name.ValueString()))
+}

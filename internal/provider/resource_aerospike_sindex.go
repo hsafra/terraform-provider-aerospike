@@ -127,8 +127,8 @@ func (r *AerospikeSindex) Configure(ctx context.Context, req resource.ConfigureR
 	r.asConn = asConn
 }
 
-// ModifyPlan sets id from namespace/set/name so a name change updates the
-// planned id. UseStateForUnknown would otherwise keep the old id and fail apply.
+// ModifyPlan sets id from namespace/set/name. Unknown parts leave id unknown
+// so UseStateForUnknown cannot pin the prior id and fail apply.
 func (r *AerospikeSindex) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.Plan.Raw.IsNull() {
 		return
@@ -139,11 +139,8 @@ func (r *AerospikeSindex) ModifyPlan(ctx context.Context, req resource.ModifyPla
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if plan.Namespace.IsUnknown() || plan.Set.IsUnknown() || plan.Name.IsUnknown() {
-		return
-	}
 
-	plan.ID = types.StringValue(sindexID(plan.Namespace.ValueString(), plan.Set.ValueString(), plan.Name.ValueString()))
+	plan.ID = sindexPlanID(plan.Namespace, plan.Set, plan.Name)
 	resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)
 }
 
