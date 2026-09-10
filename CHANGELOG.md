@@ -1,4 +1,4 @@
-## 0.5.6
+## 0.6.0
 FEATURES:
 * New `aerospike_sindex` resource for set indexes on Aerospike Database 8.1.2+ (`sindex-create` / `sindex-delete` with `indextype=set`). Creating a set index on a config-owned index (`enable-index`) converts ownership in place — no rebuild. Changing `name` renames the SMD index rather than deleting and recreating it. Destroy uses `sindex-delete` only.
 
