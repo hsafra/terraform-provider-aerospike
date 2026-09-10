@@ -740,15 +740,15 @@ func getServerBuildsAllNodes(conn *as.Client) ([]string, error) {
 	return builds, nil
 }
 
-func buildAtLeast(build string, min *version.Version) (bool, error) {
+func buildAtLeast(build string, minimum *version.Version) (bool, error) {
 	v, err := version.NewVersion(strings.TrimSpace(build))
 	if err != nil {
 		return false, fmt.Errorf("invalid build version %q: %w", build, err)
 	}
-	return v.GreaterThanOrEqual(min), nil
+	return v.GreaterThanOrEqual(minimum), nil
 }
 
-func minBuildAtLeast(builds []string, min *version.Version) (bool, error) {
+func minBuildAtLeast(builds []string, minimum *version.Version) (bool, error) {
 	if len(builds) == 0 {
 		return false, errors.New("no build versions reported")
 	}
@@ -762,7 +762,7 @@ func minBuildAtLeast(builds []string, min *version.Version) (bool, error) {
 			lowest = v
 		}
 	}
-	return lowest.GreaterThanOrEqual(min), nil
+	return lowest.GreaterThanOrEqual(minimum), nil
 }
 
 func clusterSupportsSetSindex(conn *as.Client) (bool, error) {
