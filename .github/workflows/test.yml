@@ -64,7 +64,7 @@ jobs:
   # Run acceptance tests in a matrix with Terraform CLI versions
   # Only on pull requests - not on pushes to main after merge
   test:
-    name: Terraform Provider Acceptance Tests
+    name: Acceptance (tf ${{ matrix.terraform }}, as ${{ matrix.aerospike.version }})
     if: github.event_name == 'pull_request'
     needs: build
     runs-on: ubuntu-latest
@@ -120,3 +120,16 @@ jobs:
           AEROSPIKE_HOST_PORT_2=3010 \
           AEROSPIKE_HOST_PORT_3=3020 \
           docker compose down
+
+  # Single stable check for branch protection, aggregating the matrix above.
+  # always() is required: a skipped required check counts as passing.
+  test-summary:
+    name: Terraform Provider Acceptance Tests
+    if: always() && github.event_name == 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check matrix result
+        run: |
+          echo "matrix result: ${{ needs.test.result }}"
+          [ "${{ needs.test.result }}" = "success" ]

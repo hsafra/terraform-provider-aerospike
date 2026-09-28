@@ -3,7 +3,7 @@ module terraform-provider-aerospike
 go 1.26.0
 
 require (
-	github.com/aerospike/aerospike-client-go/v8 v8.8.0
+	github.com/aerospike/aerospike-client-go/v8 v8.9.0
 	github.com/ghetzel/go-stockutil v1.14.5
 	github.com/hashicorp/go-version v1.9.0
 	github.com/hashicorp/terraform-plugin-docs v0.25.0
