@@ -10,7 +10,9 @@ import (
 
 	as "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 // testAccServiceConfigPreCheck ensures the admin user has sys-admin role
@@ -272,11 +274,90 @@ func TestAccAerospikeServiceConfig_serverDrift(t *testing.T) {
 						t.Fatalf("failed to get client: %s", err)
 					}
 					defer client.Close()
-					_, _ = setServiceParam(client, "proto-fd-max", "28000")
+					_ = setServiceParam(client, "proto-fd-max", "28000")
 				},
 				Config: testAccServiceConfigWithParam("proto-fd-max", "25000"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("aerospike_service_config.test", "params.proto-fd-max", "25000"),
+					testAccCheckServiceParam("proto-fd-max", "25000"),
+				),
+			},
+		},
+	})
+}
+
+// info_commands follows a value changed on the server. When config then catches
+// up with the server there is nothing to apply, but refresh still updates
+// info_commands, so a consumer of it (like an S3 object) is updated.
+func TestAccAerospikeServiceConfig_infoCommandsTrackServer(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccServiceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeServiceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccServiceConfigWithConsumer("25000"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectKnownValue("aerospike_service_config.test", tfjsonpath.New("info_commands"),
+							knownStringList([]string{serviceParamCommand("proto-fd-max", "25000")})),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "info_commands.#", "1"),
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "info_commands.0", serviceParamCommand("proto-fd-max", "25000")),
+				),
+			},
+			{
+				PreConfig: func() {
+					client, err := testAccGetAerospikeClient()
+					if err != nil {
+						t.Fatalf("failed to get client: %s", err)
+					}
+					defer client.Close()
+					if err := setServiceParam(client, "proto-fd-max", "28000"); err != nil {
+						t.Fatalf("failed to set proto-fd-max on server: %s", err)
+					}
+				},
+				Config: testAccServiceConfigWithConsumer("28000"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("aerospike_service_config.test", plancheck.ResourceActionNoop),
+						plancheck.ExpectResourceAction("terraform_data.consumer", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "info_commands.0", serviceParamCommand("proto-fd-max", "28000")),
+					resource.TestCheckResourceAttr("terraform_data.consumer", "output.0", serviceParamCommand("proto-fd-max", "28000")),
+				),
+			},
+		},
+	})
+}
+
+// A failed apply leaves info_commands at the last successful value, and its
+// consumer is not updated with the rejected value.
+func TestAccAerospikeServiceConfig_infoCommandsFailedApply(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccServiceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeServiceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccServiceConfigWithConsumer("25000"),
+			},
+			{
+				Config:      testAccServiceConfigWithConsumer("not-a-number"),
+				ExpectError: regexp.MustCompile("Error setting service parameter"),
+			},
+			{
+				Config: testAccServiceConfigWithConsumer("25000"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_service_config.test", "info_commands.0", serviceParamCommand("proto-fd-max", "25000")),
+					resource.TestCheckResourceAttr("terraform_data.consumer", "output.0", serviceParamCommand("proto-fd-max", "25000")),
 					testAccCheckServiceParam("proto-fd-max", "25000"),
 				),
 			},
@@ -359,4 +440,17 @@ resource "aerospike_service_config" "second" {
     "proto-fd-max" = "30000"
   }
 }`
+}
+
+func testAccServiceConfigWithConsumer(protoFdMax string) string {
+	return fmt.Sprintf(`
+resource "aerospike_service_config" "test" {
+  params = {
+    "proto-fd-max" = "%s"
+  }
+}
+
+resource "terraform_data" "consumer" {
+  input = aerospike_service_config.test.info_commands
+}`, protoFdMax)
 }

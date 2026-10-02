@@ -6,6 +6,8 @@ package provider
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -20,6 +22,7 @@ import (
 
 var _ resource.Resource = &AerospikeNamespaceConfig{}
 var _ resource.ResourceWithImportState = &AerospikeNamespaceConfig{}
+var _ resource.ResourceWithModifyPlan = &AerospikeNamespaceConfig{}
 
 func NewAerospikeNamespaceConfig() resource.Resource {
 	return &AerospikeNamespaceConfig{}
@@ -75,7 +78,10 @@ func (r *AerospikeNamespaceConfig) Schema(ctx context.Context, req resource.Sche
 				ElementType: types.MapType{ElemType: types.StringType},
 			},
 			"info_commands": schema.ListAttribute{
-				Description: "Output-only list of all asinfo commands executed during the last create or update. " +
+				Description: "Output-only list of asinfo commands that reproduce the managed params and set_config: " +
+					"namespace params sorted by key, then sets sorted by name with their params sorted by key. " +
+					"Rebuilt from the server on every refresh, so it tracks the current config even when no apply runs. " +
+					"enable-index is omitted for sets whose index is owned by aerospike_sindex. " +
 					"Useful for persisting as commands to run when provisioning new servers.",
 				Computed:    true,
 				ElementType: types.StringType,
@@ -118,28 +124,13 @@ func (r *AerospikeNamespaceConfig) Create(ctx context.Context, req resource.Crea
 		return
 	}
 
-	var infoCommands []string
-
-	// Apply namespace-level params
-	if !data.Params.IsNull() && !data.Params.IsUnknown() {
-		diags := r.applyNamespaceParams(ctx, namespace, data.Params, &infoCommands)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
+	infoCommands, diags := r.applyNamespaceConfig(ctx, namespace, data.Params, data.SetConfig)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	// Apply set-level params
-	if !data.SetConfig.IsNull() && !data.SetConfig.IsUnknown() {
-		diags := r.applySetParams(ctx, namespace, data.SetConfig, &infoCommands)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-	}
-
-	// Build info_commands list
-	cmdList, diags := types.ListValueFrom(ctx, types.StringType, infoCommands)
+	cmdList, diags := infoCommandsList(ctx, infoCommands)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -204,8 +195,10 @@ func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRe
 	}
 
 	// Best-effort read of set-level params
+	smdOwned := map[string]bool{}
 	if !data.SetConfig.IsNull() {
-		smdOwned, _, smdDiags := r.smdOwnedSets(namespace, data.SetConfig)
+		var smdDiags diag.Diagnostics
+		smdOwned, _, smdDiags = r.smdOwnedSets(namespace, data.SetConfig)
 		resp.Diagnostics.Append(smdDiags...)
 		if resp.Diagnostics.HasError() {
 			return
@@ -245,15 +238,14 @@ func (r *AerospikeNamespaceConfig) Read(ctx context.Context, req resource.ReadRe
 		data.SetConfig = setConfigMap
 	}
 
-	// info_commands preserved from state; initialize to empty list if null (e.g., after import)
-	if data.InfoCommands.IsNull() {
-		emptyList, diags := types.ListValueFrom(ctx, types.StringType, []string{})
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		data.InfoCommands = emptyList
+	// enable-index is not sent for SMD-owned sets, matching applyNamespaceConfig.
+	cmdList, diags := infoCommandsList(ctx, namespaceInfoCommands(namespace,
+		stringMapFromTypesMap(data.Params), nestedStringMapFromTypesMap(data.SetConfig), smdOwned))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
+	data.InfoCommands = cmdList
 
 	tflog.Trace(ctx, "read namespace config for "+namespace)
 
@@ -270,15 +262,12 @@ func (r *AerospikeNamespaceConfig) Update(ctx context.Context, req resource.Upda
 	}
 
 	namespace := plan.Namespace.ValueString()
-	var infoCommands []string
 
-	// Apply namespace-level params (set all plan params — Aerospike set-config is idempotent)
-	if !plan.Params.IsNull() && !plan.Params.IsUnknown() {
-		diags := r.applyNamespaceParams(ctx, namespace, plan.Params, &infoCommands)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
+	// Apply all plan params — Aerospike set-config is idempotent
+	infoCommands, diags := r.applyNamespaceConfig(ctx, namespace, plan.Params, plan.SetConfig)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	// Warn about removed namespace params
@@ -294,17 +283,7 @@ func (r *AerospikeNamespaceConfig) Update(ctx context.Context, req resource.Upda
 
 	warnRemovedSetConfig(&resp.Diagnostics, state.SetConfig, plan.SetConfig, namespace)
 
-	// Apply set-level params
-	if !plan.SetConfig.IsNull() && !plan.SetConfig.IsUnknown() {
-		diags := r.applySetParams(ctx, namespace, plan.SetConfig, &infoCommands)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-	}
-
-	// Build info_commands list
-	cmdList, diags := types.ListValueFrom(ctx, types.StringType, infoCommands)
+	cmdList, diags := infoCommandsList(ctx, infoCommands)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -316,6 +295,31 @@ func (r *AerospikeNamespaceConfig) Update(ctx context.Context, req resource.Upda
 	tflog.Trace(ctx, "updated namespace config for "+namespace)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+// ModifyPlan predicts info_commands from the planned params and set_config. On
+// 8.1.2+, whether enable-index is sent depends on SMD ownership at apply time (an
+// aerospike_sindex in the same apply can take over the set), so info_commands
+// stays unknown there.
+func (r *AerospikeNamespaceConfig) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var plan AerospikeNamespaceConfigModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	known := !plan.Namespace.IsUnknown() && mapFullyKnown(plan.Params) && mapFullyKnown(plan.SetConfig)
+	if known && setConfigHasParam(plan.SetConfig, enableIndexParam) {
+		supports, err := serverSupportsSetSindex(r.asConn)
+		known = err == nil && !supports
+	}
+
+	planInfoCommands(ctx, req, resp, namespaceInfoCommands(plan.Namespace.ValueString(),
+		stringMapFromTypesMap(plan.Params), nestedStringMapFromTypesMap(plan.SetConfig), nil), known)
 }
 
 func (r *AerospikeNamespaceConfig) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -338,11 +342,44 @@ func (r *AerospikeNamespaceConfig) ImportState(ctx context.Context, req resource
 	resource.ImportStatePassthroughID(ctx, path.Root("namespace"), req, resp)
 }
 
-// applyNamespaceParams validates and applies namespace-level parameters.
-func (r *AerospikeNamespaceConfig) applyNamespaceParams(ctx context.Context, namespace string, params types.Map, infoCommands *[]string) diag.Diagnostics {
+// applyNamespaceConfig validates every namespace and set param, decides which
+// sets skip enable-index, then sends the commands from namespaceInfoCommands.
+// Nothing is sent if validation fails. It returns the commands sent.
+func (r *AerospikeNamespaceConfig) applyNamespaceConfig(ctx context.Context, namespace string, paramsVal, setConfigVal types.Map) ([]string, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
-	// Read current config to validate param keys
+	params := stringMapFromTypesMap(paramsVal)
+	setConfig := nestedStringMapFromTypesMap(setConfigVal)
+
+	diags.Append(r.validateNamespaceParams(namespace, params)...)
+	diags.Append(r.validateSetParams(ctx, namespace, setConfig)...)
+	if diags.HasError() {
+		return nil, diags
+	}
+
+	skipEnableIndexSets, skipDiags := r.enableIndexSkips(namespace, setConfigVal, setConfig)
+	diags.Append(skipDiags...)
+	if diags.HasError() {
+		return nil, diags
+	}
+
+	cmds := namespaceInfoCommands(namespace, params, setConfig, skipEnableIndexSets)
+	if err := sendInfoCommandsAllNodes(ctx, r.asConn.client, cmds); err != nil {
+		diags.AddError("Error applying namespace config",
+			fmt.Sprintf("Failed to apply config to namespace %q: %s", namespace, err.Error()))
+		return nil, diags
+	}
+
+	return cmds, diags
+}
+
+// validateNamespaceParams checks every key against the namespace's server config.
+func (r *AerospikeNamespaceConfig) validateNamespaceParams(namespace string, params map[string]string) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if len(params) == 0 {
+		return diags
+	}
+
 	serverConfig, err := getNamespaceConfig(r.asConn.client, namespace)
 	if err != nil {
 		diags.AddError("Error reading namespace config",
@@ -350,126 +387,64 @@ func (r *AerospikeNamespaceConfig) applyNamespaceParams(ctx context.Context, nam
 		return diags
 	}
 
-	// Validate all keys exist, then apply
-	for key, val := range params.Elements() {
+	for _, key := range slices.Sorted(maps.Keys(params)) {
 		if _, ok := serverConfig[key]; !ok {
 			diags.AddError("Invalid namespace parameter",
 				fmt.Sprintf("Parameter %q is not a valid namespace config parameter for namespace %q on this Aerospike server version.", key, namespace))
 		}
-
-		strVal, ok := val.(types.String)
-		if !ok {
-			diags.AddError("Invalid parameter value",
-				fmt.Sprintf("Parameter %q has a non-string value.", key))
-		}
-
-		if diags.HasError() {
-			continue
-		}
-
-		command, err := setNamespaceParam(r.asConn.client, namespace, key, strVal.ValueString())
-		if err != nil {
-			diags.AddError("Error setting namespace parameter",
-				fmt.Sprintf("Failed to set parameter %q=%q on namespace %q: %s", key, strVal.ValueString(), namespace, err.Error()))
-			return diags
-		}
-
-		tflog.Trace(ctx, "set namespace param: "+command)
-		*infoCommands = append(*infoCommands, command)
 	}
-
 	return diags
 }
 
-// applySetParams validates and applies set-level parameters.
-// It reads available set params from the server to validate keys before setting them.
-func (r *AerospikeNamespaceConfig) applySetParams(ctx context.Context, namespace string, setConfig types.Map, infoCommands *[]string) diag.Diagnostics {
+// validateSetParams checks every set's keys against the params the server
+// reports for sets in the namespace. Validation is skipped when the namespace
+// has no sets yet.
+func (r *AerospikeNamespaceConfig) validateSetParams(ctx context.Context, namespace string, setConfig map[string]map[string]string) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	var supportsSetSindex bool
-	if setConfigHasParam(setConfig, enableIndexParam) {
-		ok, err := serverSupportsSetSindex(r.asConn)
-		if err != nil {
-			diags.AddError("Error reading Aerospike version",
-				fmt.Sprintf("Could not determine server version: %s", err.Error()))
-			return diags
-		}
-		supportsSetSindex = ok
-	}
-
-	for setName, innerVal := range setConfig.Elements() {
-		innerMap, ok := innerVal.(types.Map)
-		if !ok {
-			diags.AddError("Invalid set_config value",
-				fmt.Sprintf("Expected a map of parameters for set %q, got unexpected type.", setName))
-			continue
-		}
-
-		// Validate set param keys against server
+	for _, setName := range slices.Sorted(maps.Keys(setConfig)) {
 		validKeys, err := getValidSetParamKeys(r.asConn.client, namespace, setName)
 		if err != nil {
 			diags.AddError("Error reading set config",
 				fmt.Sprintf("Could not read set info for %q in namespace %q to validate parameters: %s", setName, namespace, err.Error()))
 			return diags
 		}
-
-		if validKeys != nil {
-			for key := range innerMap.Elements() {
-				if !validKeys[key] {
-					diags.AddError("Invalid set parameter",
-						fmt.Sprintf("Parameter %q is not a valid set-level config parameter for set %q in namespace %q on this Aerospike server version.", key, setName, namespace))
-				}
-			}
-			if diags.HasError() {
-				return diags
-			}
-		} else {
+		if validKeys == nil {
 			tflog.Trace(ctx, fmt.Sprintf("no existing sets in namespace %q to validate set param keys — skipping validation", namespace))
+			continue
 		}
-
-		for key, val := range innerMap.Elements() {
-			strVal, ok := val.(types.String)
-			if !ok {
-				diags.AddError("Invalid parameter value",
-					fmt.Sprintf("Parameter %q for set %q has a non-string value.", key, setName))
-				continue
+		for _, key := range slices.Sorted(maps.Keys(setConfig[setName])) {
+			if !validKeys[key] {
+				diags.AddError("Invalid set parameter",
+					fmt.Sprintf("Parameter %q is not a valid set-level config parameter for set %q in namespace %q on this Aerospike server version.", key, setName, namespace))
 			}
-
-			if key == enableIndexParam {
-				smdOwned := false
-				if supportsSetSindex {
-					entry, err := getSetIndex(r.asConn.client, namespace, setName)
-					if err != nil {
-						diags.AddError("Error reading sindex list",
-							fmt.Sprintf("Could not list sindexes for namespace %q to detect SMD-owned set indexes: %s", namespace, err.Error()))
-						return diags
-					}
-					smdOwned = entry != nil
-				}
-				skip, skipDiags := skipEnableIndex(namespace, setName, strVal.ValueString(), supportsSetSindex, smdOwned)
-				diags.Append(skipDiags...)
-				if diags.HasError() {
-					return diags
-				}
-				if skip {
-					continue
-				}
-			}
-
-			command, err := setNamespaceSetParam(r.asConn.client, namespace, setName, key, strVal.ValueString())
-			if err != nil {
-				diags.AddError("Error setting set parameter",
-					fmt.Sprintf("Failed to set parameter %q=%q on set %q in namespace %q: %s",
-						key, strVal.ValueString(), setName, namespace, err.Error()))
-				return diags
-			}
-
-			tflog.Trace(ctx, "set set-level param: "+command)
-			*infoCommands = append(*infoCommands, command)
 		}
 	}
-
 	return diags
+}
+
+// enableIndexSkips returns the sets whose enable-index must not be sent (see
+// skipEnableIndex), with the warnings or errors that decision produces.
+func (r *AerospikeNamespaceConfig) enableIndexSkips(namespace string, setConfigVal types.Map, setConfig map[string]map[string]string) (map[string]bool, diag.Diagnostics) {
+	skips := map[string]bool{}
+
+	smdOwned, supports, diags := r.smdOwnedSets(namespace, setConfigVal)
+	if diags.HasError() {
+		return skips, diags
+	}
+
+	for _, setName := range slices.Sorted(maps.Keys(setConfig)) {
+		value, ok := setConfig[setName][enableIndexParam]
+		if !ok {
+			continue
+		}
+		skip, skipDiags := skipEnableIndex(namespace, setName, value, supports, smdOwned[setName])
+		diags.Append(skipDiags...)
+		if skip {
+			skips[setName] = true
+		}
+	}
+	return skips, diags
 }
 
 func setConfigHasParam(setConfig types.Map, key string) bool {

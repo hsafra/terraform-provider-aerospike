@@ -489,21 +489,16 @@ func stripNamespaceSubcontext(key string) string {
 	return key
 }
 
-// setNamespaceParam sets a single namespace-level configuration parameter via set-config.
-// Parameters with the "storage-engine." prefix are automatically stripped because
-// Aerospike's set-config does not accept the subcontext prefix.
-func setNamespaceParam(conn *as.Client, namespace, key, value string) (string, error) {
-	setKey := stripNamespaceSubcontext(key)
-	command := "set-config:context=namespace;id=" + namespace + ";" + setKey + "=" + value
-	_, err := sendInfoCommandAllNodes(conn, command)
-	return command, err
+// namespaceParamCommand formats the set-config command for a namespace-level parameter.
+// The "storage-engine." prefix is stripped because Aerospike's set-config does not
+// accept the subcontext prefix.
+func namespaceParamCommand(namespace, key, value string) string {
+	return "set-config:context=namespace;id=" + namespace + ";" + stripNamespaceSubcontext(key) + "=" + value
 }
 
-// setNamespaceSetParam sets a single set-level configuration parameter within a namespace.
-func setNamespaceSetParam(conn *as.Client, namespace, setName, key, value string) (string, error) {
-	command := "set-config:context=namespace;id=" + namespace + ";set=" + setName + ";" + key + "=" + value
-	_, err := sendInfoCommandAllNodes(conn, command)
-	return command, err
+// namespaceSetParamCommand formats the set-config command for a set-level parameter.
+func namespaceSetParamCommand(namespace, setName, key, value string) string {
+	return "set-config:context=namespace;id=" + namespace + ";set=" + setName + ";" + key + "=" + value
 }
 
 // getClusterSize returns the cluster_size the server reports via the
@@ -551,11 +546,9 @@ func getServiceConfigAllNodes(conn *as.Client, priorState map[string]string) (ma
 	return reduced, divergences, nil
 }
 
-// setServiceParam sets a single service-level configuration parameter via set-config.
-func setServiceParam(conn *as.Client, key, value string) (string, error) {
-	command := "set-config:context=service;" + key + "=" + value
-	_, err := sendInfoCommandAllNodes(conn, command)
-	return command, err
+// serviceParamCommand formats the set-config command for a service-level parameter.
+func serviceParamCommand(key, value string) string {
+	return "set-config:context=service;" + key + "=" + value
 }
 
 // getXDRDCConfig reads all DC-level XDR configuration parameters for a given datacenter.

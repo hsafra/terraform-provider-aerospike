@@ -1,3 +1,16 @@
+## 0.7.0
+BREAKING CHANGES:
+* **`info_commands` changes meaning and behaviour** on `aerospike_service_config`, `aerospike_namespace_config` and `aerospike_sindex`. It used to be a log of the commands sent by the last create or update. It is now the list of commands that reproduce the resource's managed config:
+  * It is rebuilt from the server on every refresh, not only when an apply runs. If a value is changed directly on the cluster and the config is then updated to match, nothing is applied, but `info_commands` still updates, so anything consuming it (for example an S3 object holding the commands to replay on new servers) picks up the new value. Before, the consumer stayed stale.
+  * It is always the full list for the managed config, not just what the last apply happened to send.
+  * It is sorted: namespace params, then sets by name, each by key. Before, the order was random on every apply, which could rewrite consumers even when nothing changed.
+  * It is known at plan time when the planned params are known, so a PR plan shows the exact new list instead of "known after apply". The exception is `aerospike_namespace_config` with `enable-index` in `set_config` on 8.1.2+, which stays unknown until apply because SMD ownership is only decided then.
+  * `enable-index` is left out for sets whose index is owned by `aerospike_sindex`, matching what is actually sent.
+* **Expect a one-time diff after upgrading.** The first refresh rewrites `info_commands` in existing state, so anything consuming it will show an in-place update on the first plan.
+
+BUG FIXES:
+* An invalid service, namespace or set parameter key no longer leaves some of the valid keys applied — all keys are validated before any command is sent
+
 ## 0.6.0
 FEATURES:
 * New `aerospike_sindex` resource for set indexes on Aerospike Database 8.1.2+ (`sindex-create` / `sindex-delete` with `indextype=set`). Creating a set index on a config-owned index (`enable-index`) converts ownership in place — no rebuild. Changing `name` renames the SMD index rather than deleting and recreating it. Destroy uses `sindex-delete` only.

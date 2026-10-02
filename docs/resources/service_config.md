@@ -35,7 +35,7 @@ output "applied_commands" {
 
 ### Read-Only
 
-- `info_commands` (List of String) Output-only list of all asinfo commands executed during the last create or update. Useful for persisting as commands to run when provisioning new servers.
+- `info_commands` (List of String) Output-only list of asinfo commands that reproduce the managed params, sorted by key. Rebuilt from the server on every refresh, so it tracks the current config even when no apply runs. Useful for persisting as commands to run when provisioning new servers.
 
 ## Import
 

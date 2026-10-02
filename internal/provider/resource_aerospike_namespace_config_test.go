@@ -5,12 +5,15 @@ package provider
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"testing"
 
 	as "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 // testAccNamespaceConfigPreCheck ensures the admin user has sys-admin role
@@ -158,7 +161,7 @@ func TestAccAerospikeNamespaceConfig_invalidSetParam(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      testAccNamespaceConfigWithInvalidSetParam(),
-				ExpectError: regexp.MustCompile("Invalid set parameter|Error setting set parameter"),
+				ExpectError: regexp.MustCompile("Invalid set parameter|Error applying namespace config"),
 			},
 		},
 	})
@@ -416,13 +419,145 @@ func TestAccAerospikeNamespaceConfig_serverDrift(t *testing.T) {
 						t.Fatalf("failed to get client: %s", err)
 					}
 					defer client.Close()
-					_, _ = setNamespaceParam(client, "aerospike", "default-ttl", "999")
+					_ = setNamespaceParam(client, "aerospike", "default-ttl", "999")
 				},
 				Config: testAccNamespaceConfigWithParam("default-ttl", "400"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "400"),
 					testAccCheckNamespaceParam("aerospike", "default-ttl", "400"),
 				),
+			},
+		},
+	})
+}
+
+// info_commands follows namespace and set values changed on the server. When
+// config then catches up with the server there is nothing to apply, but refresh
+// still updates info_commands and its consumer.
+func TestAccAerospikeNamespaceConfig_infoCommandsTrackServer(t *testing.T) {
+	commands := func(ttl, stopWritesCount string) []string {
+		return []string{
+			namespaceParamCommand("aerospike", "default-ttl", ttl),
+			namespaceSetParamCommand("aerospike", "testset1", "stop-writes-count", stopWritesCount),
+		}
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccNamespaceConfigWithConsumer("400", "1000"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectKnownValue("aerospike_namespace_config.test", tfjsonpath.New("info_commands"),
+							knownStringList(commands("400", "1000"))),
+					},
+				},
+				Check: testAccCheckStringList("aerospike_namespace_config.test", "info_commands", commands("400", "1000")),
+			},
+			{
+				PreConfig: func() {
+					client, err := testAccGetAerospikeClient()
+					if err != nil {
+						t.Fatalf("failed to get client: %s", err)
+					}
+					defer client.Close()
+					if err := setNamespaceParam(client, "aerospike", "default-ttl", "999"); err != nil {
+						t.Fatalf("failed to set default-ttl on server: %s", err)
+					}
+					if err := setNamespaceSetParam(client, "aerospike", "testset1", "stop-writes-count", "2000"); err != nil {
+						t.Fatalf("failed to set stop-writes-count on server: %s", err)
+					}
+				},
+				Config: testAccNamespaceConfigWithConsumer("999", "2000"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("aerospike_namespace_config.test", plancheck.ResourceActionNoop),
+						plancheck.ExpectResourceAction("terraform_data.consumer", plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckStringList("aerospike_namespace_config.test", "info_commands", commands("999", "2000")),
+					testAccCheckStringList("terraform_data.consumer", "output", commands("999", "2000")),
+				),
+			},
+		},
+	})
+}
+
+// A failed apply leaves info_commands at the last successful value, and its
+// consumer is not updated with the rejected value.
+func TestAccAerospikeNamespaceConfig_infoCommandsFailedApply(t *testing.T) {
+	commands := []string{
+		namespaceParamCommand("aerospike", "default-ttl", "400"),
+		namespaceSetParamCommand("aerospike", "testset1", "stop-writes-count", "1000"),
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccNamespaceConfigWithConsumer("400", "1000"),
+			},
+			{
+				Config:      testAccNamespaceConfigWithConsumer("not-a-number", "1000"),
+				ExpectError: regexp.MustCompile("Error applying namespace config"),
+			},
+			{
+				Config: testAccNamespaceConfigWithConsumer("400", "1000"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckStringList("aerospike_namespace_config.test", "info_commands", commands),
+					testAccCheckStringList("terraform_data.consumer", "output", commands),
+					testAccCheckNamespaceParam("aerospike", "default-ttl", "400"),
+				),
+			},
+		},
+	})
+}
+
+// enable-index is listed when sent. On 8.1.2+ SMD ownership is only known at
+// apply time, so info_commands is unknown in the plan; earlier versions plan it.
+func TestAccAerospikeNamespaceConfig_infoCommandsEnableIndex(t *testing.T) {
+	if os.Getenv(resource.EnvTfAcc) == "" {
+		t.Skipf("acceptance tests skipped unless env %s is set", resource.EnvTfAcc)
+	}
+	testAccNamespaceConfigPreCheck(t)
+
+	const setName = "nsic_enable"
+	command := namespaceSetParamCommand("aerospike", setName, "enable-index", "true")
+
+	planCheck := plancheck.ExpectKnownValue("aerospike_namespace_config.test", tfjsonpath.New("info_commands"),
+		knownStringList([]string{command}))
+	if testAccServerSupportsSetSindex(t) {
+		planCheck = plancheck.ExpectUnknownValue("aerospike_namespace_config.test", tfjsonpath.New("info_commands"))
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+resource "aerospike_namespace_config" "test" {
+  namespace = "aerospike"
+
+  set_config = {
+    "%s" = {
+      "enable-index" = "true"
+    }
+  }
+}`, setName),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{planCheck},
+				},
+				Check: testAccCheckStringList("aerospike_namespace_config.test", "info_commands", []string{command}),
 			},
 		},
 	})
@@ -680,5 +815,13 @@ resource "aerospike_namespace_config" "test" {
     "default-ttl"                   = "500"
     "storage-engine.defrag-lwm-pct" = "70"
   }
+}`
+}
+
+func testAccNamespaceConfigWithConsumer(ttl, stopWritesCount string) string {
+	return testAccNamespaceConfigParamsAndSetConfig(ttl, stopWritesCount) + `
+
+resource "terraform_data" "consumer" {
+  input = aerospike_namespace_config.test.info_commands
 }`
 }
