@@ -12,7 +12,9 @@ import (
 
 	as "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 func testAccSindexPreCheck(t *testing.T) {
@@ -310,13 +312,19 @@ func TestAccAerospikeSindex_emptySet(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: testAccSindexConfig("sidx_empty", "sidx_empty-idx"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectKnownValue("aerospike_sindex.test", tfjsonpath.New("info_commands"),
+							knownStringList(sindexInfoCommands("aerospike", "sidx_empty", "sidx_empty-idx"))),
+					},
+				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("aerospike_sindex.test", "namespace", "aerospike"),
 					resource.TestCheckResourceAttr("aerospike_sindex.test", "set", "sidx_empty"),
 					resource.TestCheckResourceAttr("aerospike_sindex.test", "name", "sidx_empty-idx"),
 					resource.TestCheckResourceAttr("aerospike_sindex.test", "index_type", "set"),
 					resource.TestCheckResourceAttr("aerospike_sindex.test", "id", "aerospike/sidx_empty/sidx_empty-idx"),
-					resource.TestCheckResourceAttrSet("aerospike_sindex.test", "info_commands.#"),
+					testAccCheckStringList("aerospike_sindex.test", "info_commands", sindexInfoCommands("aerospike", "sidx_empty", "sidx_empty-idx")),
 					testAccCheckSetSindexPresent("aerospike", "sidx_empty", "sidx_empty-idx"),
 					testAccCheckSetIndexCount("aerospike", "sidx_empty", 1),
 					testAccCheckInfoCommandsNoEnableIndexFalse("aerospike_sindex.test"),
@@ -462,11 +470,15 @@ func TestAccAerospikeSindex_convertFromEnableIndex(t *testing.T) {
 				),
 			},
 			// Keep enable-index=true after conversion; change another param.
+			// The set is SMD-owned now, so enable-index is neither sent nor listed.
 			{
 				Config: testAccSindexWithNamespaceConfig(setName, "sidx_convert-idx", "true", "60000"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					testAccCheckSetSindexPresent("aerospike", setName, "sidx_convert-idx"),
 					testAccCheckSetIndexCount("aerospike", setName, 1),
+					testAccCheckStringList("aerospike_namespace_config.test", "info_commands", []string{
+						namespaceSetParamCommand("aerospike", setName, "stop-writes-count", "60000"),
+					}),
 				),
 			},
 			// Drop enable-index from HCL; index stays.
@@ -552,7 +564,7 @@ func TestAccDeleteSetSindexConfigOwned(t *testing.T) {
 	const setName = "sidx_cfg_owned"
 	testAccWriteSetRecords(t, ns, setName, 1)
 
-	if _, err := setNamespaceSetParam(client, ns, setName, "enable-index", "true"); err != nil {
+	if err := setNamespaceSetParam(client, ns, setName, "enable-index", "true"); err != nil {
 		t.Fatalf("enable-index=true: %s", err)
 	}
 
@@ -564,7 +576,7 @@ func TestAccDeleteSetSindexConfigOwned(t *testing.T) {
 		t.Fatalf("expected config-owned error, got: %s", err)
 	}
 
-	if _, err := setNamespaceSetParam(client, ns, setName, "enable-index", "false"); err != nil {
+	if err := setNamespaceSetParam(client, ns, setName, "enable-index", "false"); err != nil {
 		t.Fatalf("cleanup enable-index=false: %s", err)
 	}
 }

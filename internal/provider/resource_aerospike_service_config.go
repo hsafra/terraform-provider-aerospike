@@ -6,9 +6,12 @@ package provider
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sync/atomic"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -17,6 +20,7 @@ import (
 
 var _ resource.Resource = &AerospikeServiceConfig{}
 var _ resource.ResourceWithImportState = &AerospikeServiceConfig{}
+var _ resource.ResourceWithModifyPlan = &AerospikeServiceConfig{}
 
 func NewAerospikeServiceConfig() resource.Resource {
 	return &AerospikeServiceConfig{}
@@ -52,7 +56,8 @@ func (r *AerospikeServiceConfig) Schema(ctx context.Context, req resource.Schema
 				ElementType: types.StringType,
 			},
 			"info_commands": schema.ListAttribute{
-				Description: "Output-only list of all asinfo commands executed during the last create or update. " +
+				Description: "Output-only list of asinfo commands that reproduce the managed params, sorted by key. " +
+					"Rebuilt from the server on every refresh, so it tracks the current config even when no apply runs. " +
 					"Useful for persisting as commands to run when provisioning new servers.",
 				Computed:    true,
 				ElementType: types.StringType,
@@ -95,20 +100,14 @@ func (r *AerospikeServiceConfig) Create(ctx context.Context, req resource.Create
 		return
 	}
 
-	var infoCommands []string
-
-	// Apply service-level params
-	if !data.Params.IsNull() && !data.Params.IsUnknown() {
-		diags := r.applyServiceParams(ctx, data.Params, &infoCommands)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			atomic.StoreInt32(&r.asConn.serviceConfigClaimed, 0)
-			return
-		}
+	infoCommands, diags := r.applyServiceParams(ctx, stringMapFromTypesMap(data.Params))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		atomic.StoreInt32(&r.asConn.serviceConfigClaimed, 0)
+		return
 	}
 
-	// Build info_commands list
-	cmdList, diags := types.ListValueFrom(ctx, types.StringType, infoCommands)
+	cmdList, diags := infoCommandsList(ctx, infoCommands)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		atomic.StoreInt32(&r.asConn.serviceConfigClaimed, 0)
@@ -163,15 +162,12 @@ func (r *AerospikeServiceConfig) Read(ctx context.Context, req resource.ReadRequ
 		data.Params = paramMap
 	}
 
-	// info_commands preserved from state; initialize to empty list if null (e.g., after import)
-	if data.InfoCommands.IsNull() {
-		emptyList, diags := types.ListValueFrom(ctx, types.StringType, []string{})
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		data.InfoCommands = emptyList
+	cmdList, diags := infoCommandsList(ctx, serviceInfoCommands(stringMapFromTypesMap(data.Params)))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
+	data.InfoCommands = cmdList
 
 	tflog.Trace(ctx, "read service config")
 
@@ -187,15 +183,11 @@ func (r *AerospikeServiceConfig) Update(ctx context.Context, req resource.Update
 		return
 	}
 
-	var infoCommands []string
-
-	// Apply service-level params (set all plan params — Aerospike set-config is idempotent)
-	if !plan.Params.IsNull() && !plan.Params.IsUnknown() {
-		diags := r.applyServiceParams(ctx, plan.Params, &infoCommands)
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
+	// Apply all plan params — Aerospike set-config is idempotent
+	infoCommands, diags := r.applyServiceParams(ctx, stringMapFromTypesMap(plan.Params))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	// Warn about removed service params
@@ -209,8 +201,7 @@ func (r *AerospikeServiceConfig) Update(ctx context.Context, req resource.Update
 		}
 	}
 
-	// Build info_commands list
-	cmdList, diags := types.ListValueFrom(ctx, types.StringType, infoCommands)
+	cmdList, diags := infoCommandsList(ctx, infoCommands)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -222,6 +213,21 @@ func (r *AerospikeServiceConfig) Update(ctx context.Context, req resource.Update
 	tflog.Trace(ctx, "updated service config")
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+// ModifyPlan predicts info_commands from the planned params.
+func (r *AerospikeServiceConfig) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var params types.Map
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("params"), &params)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	planInfoCommands(ctx, req, resp, serviceInfoCommands(stringMapFromTypesMap(params)), mapFullyKnown(params))
 }
 
 func (r *AerospikeServiceConfig) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -251,45 +257,38 @@ func (r *AerospikeServiceConfig) ImportState(ctx context.Context, req resource.I
 	})...)
 }
 
-// applyServiceParams validates and applies service-level parameters.
-func (r *AerospikeServiceConfig) applyServiceParams(ctx context.Context, params types.Map, infoCommands *[]string) diag.Diagnostics {
+// applyServiceParams validates every key against the server, then sends the
+// commands from serviceInfoCommands. Nothing is sent if any key is invalid.
+// It returns the commands sent.
+func (r *AerospikeServiceConfig) applyServiceParams(ctx context.Context, params map[string]string) ([]string, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
-	// Read current config to validate param keys
+	if len(params) == 0 {
+		return []string{}, diags
+	}
+
 	serverConfig, err := getServiceConfig(r.asConn.client)
 	if err != nil {
 		diags.AddError("Error reading service config",
 			fmt.Sprintf("Could not read current service config to validate parameters: %s", err.Error()))
-		return diags
+		return nil, diags
 	}
 
-	// Validate all keys exist, then apply
-	for key, val := range params.Elements() {
+	for _, key := range slices.Sorted(maps.Keys(params)) {
 		if _, ok := serverConfig[key]; !ok {
 			diags.AddError("Invalid service parameter",
 				fmt.Sprintf("Parameter %q is not a valid service config parameter on this Aerospike server version.", key))
 		}
-
-		strVal, ok := val.(types.String)
-		if !ok {
-			diags.AddError("Invalid parameter value",
-				fmt.Sprintf("Parameter %q has a non-string value.", key))
-		}
-
-		if diags.HasError() {
-			continue
-		}
-
-		command, err := setServiceParam(r.asConn.client, key, strVal.ValueString())
-		if err != nil {
-			diags.AddError("Error setting service parameter",
-				fmt.Sprintf("Failed to set service parameter %q=%q: %s", key, strVal.ValueString(), err.Error()))
-			return diags
-		}
-
-		tflog.Trace(ctx, "set service param: "+command)
-		*infoCommands = append(*infoCommands, command)
+	}
+	if diags.HasError() {
+		return nil, diags
 	}
 
-	return diags
+	cmds := serviceInfoCommands(params)
+	if err := sendInfoCommandsAllNodes(ctx, r.asConn.client, cmds); err != nil {
+		diags.AddError("Error setting service parameter", err.Error())
+		return nil, diags
+	}
+
+	return cmds, diags
 }
