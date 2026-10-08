@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	as "github.com/aerospike/aerospike-client-go/v8"
-	astypes "github.com/aerospike/aerospike-client-go/v8/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -27,13 +26,8 @@ func testAccCheckAerospikeRoleDestroy(s *terraform.State) error {
 			continue
 		}
 
-		adminPol := as.NewAdminPolicy()
-		_, queryErr := client.QueryRole(adminPol, rs.Primary.Attributes["role_name"])
-		if queryErr == nil {
-			return fmt.Errorf("aerospike role %s still exists", rs.Primary.Attributes["role_name"])
-		}
-		if !queryErr.Matches(astypes.INVALID_ROLE) {
-			return fmt.Errorf("unexpected error checking role %s: %w", rs.Primary.Attributes["role_name"], queryErr)
+		if err := testAccCheckRoleGone(client, rs.Primary.Attributes["role_name"]); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -455,15 +449,7 @@ func testAccCheckRoleNotExists(roleName string) resource.TestCheckFunc {
 		}
 		defer client.Close()
 
-		adminPol := as.NewAdminPolicy()
-		_, queryErr := client.QueryRole(adminPol, roleName)
-		if queryErr == nil {
-			return fmt.Errorf("role %s still exists, expected it to be deleted", roleName)
-		}
-		if !queryErr.Matches(astypes.INVALID_ROLE) {
-			return fmt.Errorf("unexpected error checking role %s: %w", roleName, queryErr)
-		}
-		return nil
+		return testAccCheckRoleGone(client, roleName)
 	}
 }
 
