@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	as "github.com/aerospike/aerospike-client-go/v8"
-	astypes "github.com/aerospike/aerospike-client-go/v8/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -26,13 +25,8 @@ func testAccCheckAerospikeUserDestroy(s *terraform.State) error {
 			continue
 		}
 
-		adminPol := as.NewAdminPolicy()
-		_, queryErr := client.QueryUser(adminPol, rs.Primary.Attributes["user_name"])
-		if queryErr == nil {
-			return fmt.Errorf("aerospike user %s still exists", rs.Primary.Attributes["user_name"])
-		}
-		if !queryErr.Matches(astypes.INVALID_USER) {
-			return fmt.Errorf("unexpected error checking user %s: %w", rs.Primary.Attributes["user_name"], queryErr)
+		if err := testAccCheckUserGone(client, rs.Primary.Attributes["user_name"]); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -353,15 +347,7 @@ func testAccCheckUserNotExists(userName string) resource.TestCheckFunc {
 		}
 		defer client.Close()
 
-		adminPol := as.NewAdminPolicy()
-		_, queryErr := client.QueryUser(adminPol, userName)
-		if queryErr == nil {
-			return fmt.Errorf("user %s still exists, expected it to be deleted", userName)
-		}
-		if !queryErr.Matches(astypes.INVALID_USER) {
-			return fmt.Errorf("unexpected error checking user %s: %w", userName, queryErr)
-		}
-		return nil
+		return testAccCheckUserGone(client, userName)
 	}
 }
 

@@ -1,3 +1,7 @@
+## 0.7.1
+BUG FIXES:
+* Fix flaky role and user acceptance tests. Their "deleted" checks queried the cluster once, right after the drop, and could hit a node that hadn't received the security change yet. They now retry for up to 10 seconds. Tests only; no provider behaviour change.
+
 ## 0.7.0
 BREAKING CHANGES:
 * **`info_commands` changes meaning and behaviour** on `aerospike_service_config`, `aerospike_namespace_config` and `aerospike_sindex`. It used to be a log of the commands sent by the last create or update. It is now the list of commands that reproduce the resource's managed config:
