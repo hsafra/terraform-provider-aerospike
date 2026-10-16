@@ -9,10 +9,29 @@ import (
 	"strings"
 	"testing"
 
+	as "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+// setServiceParam sets one service param on every node, bypassing the provider (for drift tests).
+func setServiceParam(conn *as.Client, key, value string) error {
+	_, err := sendInfoCommandAllNodes(conn, serviceParamCommand(key, value))
+	return err
+}
+
+// setNamespaceParam sets one namespace param on every node, bypassing the provider (for drift tests).
+func setNamespaceParam(conn *as.Client, namespace, key, value string) error {
+	_, err := sendInfoCommandAllNodes(conn, namespaceParamCommand(namespace, key, value))
+	return err
+}
+
+// setNamespaceSetParam sets one set param on every node, bypassing the provider (for drift tests).
+func setNamespaceSetParam(conn *as.Client, namespace, setName, key, value string) error {
+	_, err := sendInfoCommandAllNodes(conn, namespaceSetParamCommand(namespace, setName, key, value))
+	return err
+}
 
 func TestStripNamespaceSubcontext(t *testing.T) {
 	tests := []struct {

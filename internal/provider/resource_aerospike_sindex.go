@@ -101,7 +101,8 @@ func (r *AerospikeSindex) Schema(ctx context.Context, req resource.SchemaRequest
 				},
 			},
 			"info_commands": schema.ListAttribute{
-				Description: "Output-only list of asinfo commands executed during the last create or update. " +
+				Description: "Output-only list holding the asinfo command that creates this set index. " +
+					"Rebuilt from the server on every refresh. " +
 					"Useful for persisting asinfo commands to run when provisioning new servers.",
 				Computed:    true,
 				ElementType: types.StringType,
@@ -128,7 +129,8 @@ func (r *AerospikeSindex) Configure(ctx context.Context, req resource.ConfigureR
 }
 
 // ModifyPlan sets id from namespace/set/name. Unknown parts leave id unknown
-// so UseStateForUnknown cannot pin the prior id and fail apply.
+// so UseStateForUnknown cannot pin the prior id and fail apply. It also
+// predicts info_commands from the same parts.
 func (r *AerospikeSindex) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.Plan.Raw.IsNull() {
 		return
@@ -142,6 +144,12 @@ func (r *AerospikeSindex) ModifyPlan(ctx context.Context, req resource.ModifyPla
 
 	plan.ID = sindexPlanID(plan.Namespace, plan.Set, plan.Name)
 	resp.Diagnostics.Append(resp.Plan.Set(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	known := !plan.Namespace.IsUnknown() && !plan.Set.IsUnknown() && !plan.Name.IsUnknown()
+	planInfoCommands(ctx, req, resp, sindexInfoCommands(plan.Namespace.ValueString(), plan.Set.ValueString(), plan.Name.ValueString()), known)
 }
 
 func (r *AerospikeSindex) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -184,7 +192,7 @@ func (r *AerospikeSindex) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	cmdList, diags := types.ListValueFrom(ctx, types.StringType, []string{command})
+	cmdList, diags := infoCommandsList(ctx, sindexInfoCommands(namespace, setName, name))
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -232,14 +240,12 @@ func (r *AerospikeSindex) Read(ctx context.Context, req resource.ReadRequest, re
 	data.IndexType = types.StringValue("set")
 	data.ID = types.StringValue(sindexID(entry.Namespace, entry.Set, entry.Name))
 
-	if data.InfoCommands.IsNull() {
-		emptyList, diags := types.ListValueFrom(ctx, types.StringType, []string{})
-		resp.Diagnostics.Append(diags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		data.InfoCommands = emptyList
+	cmdList, diags := infoCommandsList(ctx, sindexInfoCommands(entry.Namespace, entry.Set, entry.Name))
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
+	data.InfoCommands = cmdList
 
 	tflog.Trace(ctx, "read set index "+data.ID.ValueString())
 
@@ -270,7 +276,7 @@ func (r *AerospikeSindex) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	cmdList, diags := types.ListValueFrom(ctx, types.StringType, []string{command})
+	cmdList, diags := infoCommandsList(ctx, sindexInfoCommands(namespace, setName, name))
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

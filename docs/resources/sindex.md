@@ -40,7 +40,7 @@ output "sindex_commands" {
 ### Read-Only
 
 - `id` (String) Import identifier: namespace/set/name.
-- `info_commands` (List of String) Output-only list of asinfo commands executed during the last create or update. Useful for persisting asinfo commands to run when provisioning new servers.
+- `info_commands` (List of String) Output-only list holding the asinfo command that creates this set index. Rebuilt from the server on every refresh. Useful for persisting asinfo commands to run when provisioning new servers.
 
 ## Import
 
