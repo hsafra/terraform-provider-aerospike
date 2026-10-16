@@ -6,6 +6,7 @@ package provider
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	as "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -48,4 +49,25 @@ func testAccGetAerospikeClient() (*as.Client, error) {
 	}
 
 	return client, nil
+}
+
+// Users and roles are propagated to the other cluster nodes asynchronously, and
+// admin queries go to a random node, so a query right after a change can briefly
+// see stale data on a multi-node cluster.
+const (
+	testAccConsistencyTimeout  = 10 * time.Second
+	testAccConsistencyInterval = 200 * time.Millisecond
+)
+
+// testAccEventually retries check until it succeeds or testAccConsistencyTimeout
+// elapses, returning the last error.
+func testAccEventually(check func() error) error {
+	deadline := time.Now().Add(testAccConsistencyTimeout)
+	for {
+		err := check()
+		if err == nil || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(testAccConsistencyInterval)
+	}
 }
