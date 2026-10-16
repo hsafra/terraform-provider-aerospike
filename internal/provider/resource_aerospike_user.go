@@ -9,11 +9,13 @@ import (
 	as "github.com/aerospike/aerospike-client-go/v8"
 	astypes "github.com/aerospike/aerospike-client-go/v8/types"
 	"github.com/ghetzel/go-stockutil/sliceutil"
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"reflect"
@@ -64,9 +66,12 @@ func (r *AerospikeUser) Schema(ctx context.Context, req resource.SchemaRequest, 
 				Sensitive:   true,
 			},
 			"roles": schema.ListAttribute{
-				Description: "Roles that should be granted to the user",
+				Description: "Roles that should be granted to the user. Each role may appear only once.",
 				Optional:    true,
 				ElementType: types.StringType,
+				Validators: []validator.List{
+					listvalidator.UniqueValues(),
+				},
 			},
 		},
 	}
@@ -111,7 +116,14 @@ func (r *AerospikeUser) Create(ctx context.Context, req resource.CreateRequest, 
 
 	err := r.asConn.client.CreateUser(adminPol, data.User_name.ValueString(), data.Password.ValueString(), tmpRoles)
 	if err != nil {
-		panic(err)
+		if err.Matches(astypes.USER_ALREADY_EXISTS) {
+			resp.Diagnostics.AddError("User already exists",
+				"User that was being created already exists: "+data.User_name.ValueString())
+			return
+		}
+		resp.Diagnostics.AddError("Error creating user",
+			fmt.Sprintf("Failed to create user %q: %s", data.User_name.ValueString(), err.Error()))
+		return
 	}
 
 	// Write logs using the tflog package
@@ -135,7 +147,9 @@ func (r *AerospikeUser) Read(ctx context.Context, req resource.ReadRequest, resp
 
 	tmpRoles, err := r.asConn.client.QueryUser(adminPol, data.User_name.ValueString())
 	if err != nil && !err.Matches(astypes.INVALID_USER) {
-		panic(err)
+		resp.Diagnostics.AddError("Error reading user",
+			fmt.Sprintf("Failed to query user %q: %s", data.User_name.ValueString(), err.Error()))
+		return
 	}
 
 	if err != nil && err.Matches(astypes.INVALID_USER) {
@@ -151,26 +165,7 @@ func (r *AerospikeUser) Read(ctx context.Context, req resource.ReadRequest, resp
 	prevRoles := data.Roles
 	data.Roles = nil
 	if len(tmpRoles.Roles) >= 1 && tmpRoles.Roles[0] != "" {
-		serverRoleSet := make(map[string]bool, len(tmpRoles.Roles))
-		for _, r := range tmpRoles.Roles {
-			serverRoleSet[r] = true
-		}
-
-		// Preserve the ordering from prior state to avoid perpetual diffs.
-		// Roles that were in the prior state keep their position; new roles are appended.
-		seen := make(map[string]bool)
-		for _, r := range prevRoles {
-			v := r.ValueString()
-			if serverRoleSet[v] {
-				data.Roles = append(data.Roles, types.StringValue(v))
-				seen[v] = true
-			}
-		}
-		for _, r := range tmpRoles.Roles {
-			if !seen[r] {
-				data.Roles = append(data.Roles, types.StringValue(r))
-			}
-		}
+		data.Roles = orderLikePrior(prevRoles, tmpRoles.Roles)
 	} else if prevRoles != nil {
 		// Server has no roles but state had an explicit (possibly empty) list — keep empty slice.
 		data.Roles = []types.String{}
@@ -200,7 +195,9 @@ func (r *AerospikeUser) Update(ctx context.Context, req resource.UpdateRequest, 
 		adminPol := as.NewAdminPolicy()
 		err := r.asConn.client.ChangePassword(adminPol, plan.User_name.ValueString(), plan.Password.ValueString())
 		if err != nil {
-			panic(err)
+			resp.Diagnostics.AddError("Error changing password",
+				fmt.Sprintf("Failed to change password for user %q: %s", plan.User_name.ValueString(), err.Error()))
+			return
 		}
 		tflog.Trace(ctx, "Changed password for "+data.User_name.ValueString())
 	}
@@ -233,13 +230,17 @@ func (r *AerospikeUser) Update(ctx context.Context, req resource.UpdateRequest, 
 		if len(rolesToAdd) > 0 {
 			err := r.asConn.client.GrantRoles(adminPol, plan.User_name.ValueString(), rolesToAdd)
 			if err != nil {
-				panic(err)
+				resp.Diagnostics.AddError("Error granting roles",
+					fmt.Sprintf("Failed to grant roles %v to user %q: %s", rolesToAdd, plan.User_name.ValueString(), err.Error()))
+				return
 			}
 		}
 		if len(rolesToRevoke) > 0 {
 			err := r.asConn.client.RevokeRoles(adminPol, plan.User_name.ValueString(), rolesToRevoke)
 			if err != nil {
-				panic(err)
+				resp.Diagnostics.AddError("Error revoking roles",
+					fmt.Sprintf("Failed to revoke roles %v from user %q: %s", rolesToRevoke, plan.User_name.ValueString(), err.Error()))
+				return
 			}
 		}
 		data.Roles = plan.Roles
@@ -263,7 +264,9 @@ func (r *AerospikeUser) Delete(ctx context.Context, req resource.DeleteRequest, 
 
 	err := r.asConn.client.DropUser(adminPol, data.User_name.ValueString())
 	if err != nil && !err.Matches(astypes.INVALID_USER) {
-		panic(err)
+		resp.Diagnostics.AddError("Error dropping user",
+			fmt.Sprintf("Failed to drop user %q: %s", data.User_name.ValueString(), err.Error()))
+		return
 	}
 
 	// Write logs using the tflog package

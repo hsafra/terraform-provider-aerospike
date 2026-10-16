@@ -5,6 +5,7 @@ package provider
 
 import (
 	"fmt"
+	"regexp"
 	"testing"
 
 	as "github.com/aerospike/aerospike-client-go/v8"
@@ -413,4 +414,83 @@ resource "aerospike_user" "user_with_custom" {
   roles     = [aerospike_role.custom_for_user.role_name]
 }
 `
+}
+
+// Creating a user that already exists on the server returns a diagnostic
+// instead of crashing the provider.
+func TestAccAerospikeUser_userAlreadyExists(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			testAccPreCheck(t)
+			client, err := testAccGetAerospikeClient()
+			if err != nil {
+				t.Fatalf("failed to get client: %s", err)
+			}
+			defer client.Close()
+			_ = client.CreateUser(as.NewAdminPolicy(), "testuser_preexist", "testpass1", []string{"read"})
+		},
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy: func(s *terraform.State) error {
+			client, err := testAccGetAerospikeClient()
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+			_ = client.DropUser(as.NewAdminPolicy(), "testuser_preexist")
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAerospikeUserConfig("testuser_preexist", "testpass1", `"read"`),
+				ExpectError: regexp.MustCompile(`User already exists`),
+			},
+		},
+	})
+}
+
+// Duplicate roles are rejected at plan time; the server would collapse them
+// and cause a perpetual diff.
+func TestAccAerospikeUser_duplicateRolesRejected(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAerospikeUserConfig("testuser_dup", "testpass1", `"read", "read"`),
+				ExpectError: regexp.MustCompile(`(?i)duplicate|unique`),
+			},
+		},
+	})
+}
+
+// Roles in non-sorted order keep their configured order across a refresh, so
+// the plan stays empty whatever order the server returns.
+func TestAccAerospikeUser_roleOrderPreserved(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeUserDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAerospikeUserConfig("testuser_order", "testpass1", `"write", "read", "sys-admin"`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_user.testuser_order", "roles.0", "write"),
+					resource.TestCheckResourceAttr("aerospike_user.testuser_order", "roles.1", "read"),
+					resource.TestCheckResourceAttr("aerospike_user.testuser_order", "roles.2", "sys-admin"),
+				),
+			},
+			{
+				RefreshState: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_user.testuser_order", "roles.0", "write"),
+					resource.TestCheckResourceAttr("aerospike_user.testuser_order", "roles.1", "read"),
+					resource.TestCheckResourceAttr("aerospike_user.testuser_order", "roles.2", "sys-admin"),
+				),
+			},
+			{
+				Config:   testAccAerospikeUserConfig("testuser_order", "testpass1", `"write", "read", "sys-admin"`),
+				PlanOnly: true,
+			},
+		},
+	})
 }

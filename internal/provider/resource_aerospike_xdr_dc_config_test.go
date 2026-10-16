@@ -4,12 +4,17 @@
 package provider
 
 import (
+	"context"
 	"fmt"
+	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
 	as "github.com/aerospike/aerospike-client-go/v8"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -952,7 +957,7 @@ func testAccCheckXDRDCNamespaceShipSets(expected []string) resource.TestCheckFun
 }
 
 // testAccCheckXDRDCParam verifies a DC-level config parameter on the server.
-func testAccCheckXDRDCParam(dc, key, expected string) resource.TestCheckFunc {
+func testAccCheckXDRDCParam(dc, key, expected string) resource.TestCheckFunc { //nolint:unparam // dc will vary as more tests are added
 	return func(s *terraform.State) error {
 		client, err := testAccGetAerospikeClient()
 		if err != nil {
@@ -1352,4 +1357,487 @@ resource "aerospike_xdr_dc_config" "test" {
     }
   }
 }`, periodMs, maxThroughput)
+}
+
+// --- Unit tests for pure helpers ---
+
+func TestSplitCommaList(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"a", []string{"a"}},
+		{"a,b", []string{"a", "b"}},
+		{"a,,b,", []string{"a", "b"}},
+		{" a , b ", []string{"a", "b"}},
+	}
+	for _, tt := range tests {
+		if got := splitCommaList(tt.in); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("splitCommaList(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestExtractStringListAndSlice(t *testing.T) {
+	list := types.ListValueMust(types.StringType, []attr.Value{types.StringValue("b"), types.StringValue("a")})
+	if got := extractStringList(list); !reflect.DeepEqual(got, []string{"b", "a"}) {
+		t.Errorf("extractStringList = %v, want list order kept", got)
+	}
+	if got := extractStringList(types.ListNull(types.StringType)); got != nil {
+		t.Errorf("null list: got %v", got)
+	}
+	if got := extractStringList(types.ListUnknown(types.StringType)); got != nil {
+		t.Errorf("unknown list: got %v", got)
+	}
+
+	set := types.SetValueMust(types.StringType, []attr.Value{types.StringValue("x"), types.StringValue("y")})
+	got := extractStringSlice(set)
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, []string{"x", "y"}) {
+		t.Errorf("extractStringSlice = %v", got)
+	}
+	if got := extractStringSlice(types.SetNull(types.StringType)); got != nil {
+		t.Errorf("null set: got %v", got)
+	}
+	if got := extractStringSlice(types.SetUnknown(types.StringType)); got != nil {
+		t.Errorf("unknown set: got %v", got)
+	}
+}
+
+func TestToStringSet(t *testing.T) {
+	got := toStringSet([]string{"a", "b", "a"})
+	if !reflect.DeepEqual(got, map[string]bool{"a": true, "b": true}) {
+		t.Errorf("got %v", got)
+	}
+	if len(toStringSet(nil)) != 0 {
+		t.Error("nil input should give an empty set")
+	}
+}
+
+func TestExtractOldSets(t *testing.T) {
+	shipSets := func(p XDRSetPolicyModel) types.Set { return p.ShipSets }
+
+	if got := extractOldSets(nil, shipSets); len(got) != 0 {
+		t.Errorf("no policy: got %v", got)
+	}
+	nullPolicy := []XDRSetPolicyModel{{ShipSets: types.SetNull(types.StringType)}}
+	if got := extractOldSets(nullPolicy, shipSets); len(got) != 0 {
+		t.Errorf("null set: got %v", got)
+	}
+	unknownPolicy := []XDRSetPolicyModel{{ShipSets: types.SetUnknown(types.StringType)}}
+	if got := extractOldSets(unknownPolicy, shipSets); len(got) != 0 {
+		t.Errorf("unknown set: got %v", got)
+	}
+	policy := []XDRSetPolicyModel{{ShipSets: types.SetValueMust(types.StringType,
+		[]attr.Value{types.StringValue("s1"), types.StringValue("s2")})}}
+	if got := extractOldSets(policy, shipSets); !reflect.DeepEqual(got, map[string]bool{"s1": true, "s2": true}) {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestRefreshXDRMembership(t *testing.T) {
+	nodes := func(addrs ...string) types.List {
+		vals := make([]attr.Value, 0, len(addrs))
+		for _, a := range addrs {
+			vals = append(vals, types.StringValue(a))
+		}
+		return types.ListValueMust(types.StringType, vals)
+	}
+	namespaces := func(names ...string) []XDRNamespaceModel {
+		out := make([]XDRNamespaceModel, 0, len(names))
+		for _, n := range names {
+			out = append(out, XDRNamespaceModel{Name: types.StringValue(n)})
+		}
+		return out
+	}
+	nsNames := func(nss []XDRNamespaceModel) []string {
+		out := make([]string, 0, len(nss))
+		for _, ns := range nss {
+			out = append(out, ns.Name.ValueString())
+		}
+		return out
+	}
+
+	t.Run("all present keeps state", func(t *testing.T) {
+		gotNodes, gotNs := refreshXDRMembership(
+			map[string]string{"node-address-port": "h1:3000,h2:3000", "namespaces": "ns1,ns2"},
+			nodes("h2:3000", "h1:3000"), namespaces("ns2", "ns1"))
+		if got := extractStringList(gotNodes); !reflect.DeepEqual(got, []string{"h2:3000", "h1:3000"}) {
+			t.Errorf("nodes = %v, want state order kept", got)
+		}
+		if got := nsNames(gotNs); !reflect.DeepEqual(got, []string{"ns2", "ns1"}) {
+			t.Errorf("namespaces = %v, want state order kept", got)
+		}
+	})
+
+	t.Run("detached members are dropped", func(t *testing.T) {
+		gotNodes, gotNs := refreshXDRMembership(
+			map[string]string{"node-address-port": "h1:3000", "namespaces": "ns2"},
+			nodes("h1:3000", "h2:3000"), namespaces("ns1", "ns2"))
+		if got := extractStringList(gotNodes); !reflect.DeepEqual(got, []string{"h1:3000"}) {
+			t.Errorf("nodes = %v", got)
+		}
+		if got := nsNames(gotNs); !reflect.DeepEqual(got, []string{"ns2"}) {
+			t.Errorf("namespaces = %v", got)
+		}
+	})
+
+	t.Run("empty server values drop everything", func(t *testing.T) {
+		gotNodes, gotNs := refreshXDRMembership(
+			map[string]string{"node-address-port": "", "namespaces": ""},
+			nodes("h1:3000"), namespaces("ns1"))
+		if gotNodes.IsNull() || len(gotNodes.Elements()) != 0 {
+			t.Errorf("nodes = %v, want empty non-null list", gotNodes)
+		}
+		if gotNs == nil || len(gotNs) != 0 {
+			t.Errorf("namespaces = %v, want empty non-nil slice", gotNs)
+		}
+	})
+
+	t.Run("keys not reported leave state untouched", func(t *testing.T) {
+		gotNodes, gotNs := refreshXDRMembership(map[string]string{}, nodes("h1:3000"), namespaces("ns1"))
+		if got := extractStringList(gotNodes); !reflect.DeepEqual(got, []string{"h1:3000"}) {
+			t.Errorf("nodes = %v", got)
+		}
+		if got := nsNames(gotNs); !reflect.DeepEqual(got, []string{"ns1"}) {
+			t.Errorf("namespaces = %v", got)
+		}
+	})
+
+	t.Run("unmanaged attributes stay null", func(t *testing.T) {
+		gotNodes, gotNs := refreshXDRMembership(
+			map[string]string{"node-address-port": "h1:3000", "namespaces": "ns1"},
+			types.ListNull(types.StringType), nil)
+		if !gotNodes.IsNull() {
+			t.Errorf("nodes = %v, want null", gotNodes)
+		}
+		if gotNs != nil {
+			t.Errorf("namespaces = %v, want nil", gotNs)
+		}
+	})
+}
+
+func TestXDRValidateConfig(t *testing.T) {
+	r := &AerospikeXDRDCConfig{}
+	set := func(names ...string) types.Set {
+		vals := make([]attr.Value, 0, len(names))
+		for _, n := range names {
+			vals = append(vals, types.StringValue(n))
+		}
+		return types.SetValueMust(types.StringType, vals)
+	}
+	model := func(dcParams map[string]string, ns ...XDRNamespaceModel) AerospikeXDRDCConfigModel {
+		params := types.MapNull(types.StringType)
+		if dcParams != nil {
+			params = stringMap(dcParams)
+		}
+		return AerospikeXDRDCConfigModel{DC: types.StringValue("dc"), Params: params, Namespaces: ns}
+	}
+	nsWithPolicy := func(shipOnly bool, ship, ignore types.Set) XDRNamespaceModel {
+		return XDRNamespaceModel{
+			Name:   types.StringValue("aerospike"),
+			Params: types.MapNull(types.StringType),
+			SetPolicy: []XDRSetPolicyModel{{
+				ShipOnlySpecifiedSets: types.BoolValue(shipOnly),
+				ShipSets:              ship,
+				IgnoreSets:            ignore,
+			}},
+		}
+	}
+	null := types.SetNull(types.StringType)
+
+	tests := []struct {
+		name    string
+		data    AerospikeXDRDCConfigModel
+		wantErr string
+	}{
+		{"empty config", model(nil), ""},
+		{"plain DC params", model(map[string]string{"period-ms": "100"}), ""},
+		{"reserved key in DC params", model(map[string]string{"ship-set": "s1"}), "Reserved parameter in DC params"},
+		{"reserved key in namespace params", model(nil, XDRNamespaceModel{
+			Name: types.StringValue("aerospike"), Params: stringMap(map[string]string{"ignore-set": "s1"}),
+		}), "Reserved parameter in namespace params"},
+		{"ship sets with ship-only", model(nil, nsWithPolicy(true, set("s1"), null)), ""},
+		{"ignore sets without ship-only", model(nil, nsWithPolicy(false, null, set("s1"))), ""},
+		{"ship-only with no sets", model(nil, nsWithPolicy(true, null, null)), ""},
+		{"empty sets are not 'specified'", model(nil, nsWithPolicy(false, set(), set())), ""},
+		{"both lists", model(nil, nsWithPolicy(true, set("s1"), set("s2"))), "cannot both be specified"},
+		{"ship sets without ship-only", model(nil, nsWithPolicy(false, set("s1"), null)), "ship_sets requires"},
+		{"ignore sets with ship-only", model(nil, nsWithPolicy(true, null, set("s1"))), "ignore_sets requires"},
+		{"unknown sets are skipped", model(nil, nsWithPolicy(false, types.SetUnknown(types.StringType), null)), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := r.validateConfig(context.Background(), tt.data)
+			if tt.wantErr == "" {
+				if diags.HasError() {
+					t.Fatalf("unexpected errors: %v", diags)
+				}
+				return
+			}
+			if !diags.HasError() {
+				t.Fatalf("expected error containing %q", tt.wantErr)
+			}
+			found := false
+			for _, d := range diags.Errors() {
+				if strings.Contains(d.Summary()+" "+d.Detail(), tt.wantErr) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("no error contains %q: %v", tt.wantErr, diags)
+			}
+		})
+	}
+}
+
+// --- Acceptance tests ---
+
+// testAccCheckXDRDCAbsent fails the test if dc exists on the server.
+func testAccCheckXDRDCAbsent(t *testing.T, dc string) {
+	t.Helper()
+	client, err := testAccGetAerospikeClient()
+	if err != nil {
+		t.Fatalf("failed to get client: %s", err)
+	}
+	defer client.Close()
+	if dcExists(client, dc) {
+		t.Fatalf("DC %q still exists after a failed create; it should have been rolled back", dc)
+	}
+}
+
+// testAccCheckXDRDCMembers verifies the server's namespace and node lists for dc.
+func testAccCheckXDRDCMembers(dc string, wantNamespaces, wantNodes []string) resource.TestCheckFunc { //nolint:unparam // dc will vary as more tests are added
+	return func(s *terraform.State) error {
+		client, err := testAccGetAerospikeClient()
+		if err != nil {
+			return err
+		}
+		defer client.Close()
+		cfg, err := getXDRDCConfig(client, dc)
+		if err != nil {
+			return err
+		}
+		gotNs := splitCommaList(cfg["namespaces"])
+		gotNodes := splitCommaList(cfg["node-address-port"])
+		sort.Strings(gotNs)
+		sort.Strings(gotNodes)
+		if !reflect.DeepEqual(gotNs, wantNamespaces) {
+			return fmt.Errorf("DC %q namespaces = %v, want %v", dc, gotNs, wantNamespaces)
+		}
+		if !reflect.DeepEqual(gotNodes, wantNodes) {
+			return fmt.Errorf("DC %q nodes = %v, want %v", dc, gotNodes, wantNodes)
+		}
+		return nil
+	}
+}
+
+// A create that fails after the DC exists (invalid DC param) removes the DC
+// again, so the next apply can create it instead of failing on "already exists".
+func TestAccAerospikeXDRDCConfig_invalidDCParamRollsBack(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "aerospike_xdr_dc_config" "test" {
+  dc                 = "test-dc"
+  node_address_ports = ["aerospike-target-1:3000"]
+  params = {
+    "bogus-param" = "1"
+  }
+}`,
+				ExpectError: regexp.MustCompile("Error setting XDR DC parameter"),
+			},
+			{
+				PreConfig: func() { testAccCheckXDRDCAbsent(t, "test-dc") },
+				Config:    testAccXDRDCConfigWithNamespace(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckXDRDCExists("test-dc"),
+					testAccCheckXDRDCMembers("test-dc", []string{"aerospike"}, []string{"aerospike-target-1:3000"}),
+				),
+			},
+		},
+	})
+}
+
+// Same rollback when the failure comes from a namespace-level param, after
+// nodes and the namespace have already been attached.
+func TestAccAerospikeXDRDCConfig_invalidNamespaceParamRollsBack(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: `
+resource "aerospike_xdr_dc_config" "test" {
+  dc                 = "test-dc"
+  node_address_ports = ["aerospike-target-1:3000"]
+
+  namespace {
+    name = "aerospike"
+    params = {
+      "bogus-param" = "1"
+    }
+  }
+}`,
+				ExpectError: regexp.MustCompile("Error setting XDR DC namespace parameter"),
+			},
+			{
+				PreConfig: func() { testAccCheckXDRDCAbsent(t, "test-dc") },
+				Config:    testAccXDRDCConfigWithNamespace(),
+				Check:     testAccCheckXDRDCExists("test-dc"),
+			},
+		},
+	})
+}
+
+// Importing a DC that does not exist fails with a clear error.
+func TestAccAerospikeXDRDCConfig_importNonexistent(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:        testAccXDRDCConfigBasic(),
+				ResourceName:  "aerospike_xdr_dc_config.test",
+				ImportState:   true,
+				ImportStateId: "no-such-dc",
+				ExpectError:   regexp.MustCompile("DC not found"),
+			},
+		},
+	})
+}
+
+// A namespace detached from the DC outside Terraform shows up in the plan and
+// is re-added on apply.
+func TestAccAerospikeXDRDCConfig_namespaceRemovedOutsideTerraform(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccXDRDCConfigWithNamespace(),
+				Check:  testAccCheckXDRDCMembers("test-dc", []string{"aerospike"}, []string{"aerospike-target-1:3000"}),
+			},
+			{
+				PreConfig: func() {
+					client, err := testAccGetAerospikeClient()
+					if err != nil {
+						t.Fatalf("failed to get client: %s", err)
+					}
+					defer client.Close()
+					if _, err := removeXDRDCNamespace(client, "test-dc", "aerospike"); err != nil {
+						t.Fatalf("failed to remove namespace outside Terraform: %s", err)
+					}
+				},
+				Config:             testAccXDRDCConfigWithNamespace(),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				Config: testAccXDRDCConfigWithNamespace(),
+				Check:  testAccCheckXDRDCMembers("test-dc", []string{"aerospike"}, []string{"aerospike-target-1:3000"}),
+			},
+		},
+	})
+}
+
+// A node detached from the DC outside Terraform shows up in the plan and is
+// re-added on apply.
+func TestAccAerospikeXDRDCConfig_nodeRemovedOutsideTerraform(t *testing.T) {
+	nodes := []string{"aerospike-target-1:3000", "aerospike-target-2:3000"}
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccXDRDCConfigWithNodes(nodes),
+				Check:  testAccCheckXDRDCMembers("test-dc", nil, nodes),
+			},
+			{
+				PreConfig: func() {
+					client, err := testAccGetAerospikeClient()
+					if err != nil {
+						t.Fatalf("failed to get client: %s", err)
+					}
+					defer client.Close()
+					if _, err := removeXDRDCNode(client, "test-dc", "aerospike-target-2:3000"); err != nil {
+						t.Fatalf("failed to remove node outside Terraform: %s", err)
+					}
+				},
+				Config:             testAccXDRDCConfigWithNodes(nodes),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				Config: testAccXDRDCConfigWithNodes(nodes),
+				Check:  testAccCheckXDRDCMembers("test-dc", nil, nodes),
+			},
+		},
+	})
+}
+
+// ship-only-specified-sets changed outside Terraform shows up in the plan and
+// is restored on apply.
+func TestAccAerospikeXDRDCConfig_shipOnlySpecifiedSetsDrift(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccXDRDCConfigWithShipSets(),
+				Check:  testAccCheckXDRDCNamespaceParam("ship-only-specified-sets", "true"),
+			},
+			{
+				PreConfig: func() {
+					client, err := testAccGetAerospikeClient()
+					if err != nil {
+						t.Fatalf("failed to get client: %s", err)
+					}
+					defer client.Close()
+					if _, err := setXDRDCNamespaceParam(client, "test-dc", "aerospike", "ship-only-specified-sets", "false"); err != nil {
+						t.Fatalf("failed to change ship-only-specified-sets outside Terraform: %s", err)
+					}
+				},
+				Config:             testAccXDRDCConfigWithShipSets(),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				Config: testAccXDRDCConfigWithShipSets(),
+				Check:  testAccCheckXDRDCNamespaceParam("ship-only-specified-sets", "true"),
+			},
+		},
+	})
+}
+
+// Removing the whole params map applies cleanly (with a warning) and leaves
+// the value on the server.
+func TestAccAerospikeXDRDCConfig_removeAllDCParams(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccXDRDCConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckXDRDCDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccXDRDCConfigWithDCParams("200"),
+				Check:  testAccCheckXDRDCParam("test-dc", "period-ms", "200"),
+			},
+			{
+				Config: testAccXDRDCConfigWithNodes([]string{"aerospike-target-1:3000"}),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("aerospike_xdr_dc_config.test", "params"),
+					testAccCheckXDRDCParam("test-dc", "period-ms", "200"),
+				),
+			},
+		},
+	})
 }

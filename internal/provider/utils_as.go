@@ -144,12 +144,23 @@ func sendInfoToNodeOnce(node *as.Node, command string) (map[string]string, error
 	}
 
 	for cmd, value := range result {
-		if strings.Contains(strings.ToUpper(value), "ERROR") {
-			return nil, errors.New("error in asinfo request: " + cmd + " response: " + value)
+		if err := infoResponseError(cmd, value); err != nil {
+			return nil, err
 		}
 	}
 
 	return result, nil
+}
+
+// infoResponseError reports whether an asinfo response is an error. Aerospike
+// error responses start with "ERROR" (e.g. "ERROR:4:invalid ..."). Only the
+// start of the response is checked: list responses such as sindex-list embed
+// user-chosen names, and a name like "consumer-errors-idx" is not an error.
+func infoResponseError(cmd, value string) error {
+	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(value)), "ERROR") {
+		return errors.New("error in asinfo request: " + cmd + " response: " + value)
+	}
+	return nil
 }
 
 // nodeDivergence describes a single config key whose value differs across
@@ -228,6 +239,29 @@ func appendDivergenceWarnings(diags *diag.Diagnostics, divergences []nodeDiverge
 				d.Key, where, d.formatNodeValues())
 		}
 		diags.AddWarning(summary, detail)
+	}
+}
+
+// warnRemovedParams emits one warning per key that is in state but no longer
+// in the plan. A null plan (the whole params map was removed) warns for every
+// key in state. `where` identifies the context, e.g. "namespace \"foo\"" or
+// "the service context".
+func warnRemovedParams(diags *diag.Diagnostics, stateParams, planParams types.Map, where string) {
+	if stateParams.IsNull() || stateParams.IsUnknown() || planParams.IsUnknown() {
+		return
+	}
+	planElems := planParams.Elements()
+	keys := make([]string, 0, len(stateParams.Elements()))
+	for key := range stateParams.Elements() {
+		if _, exists := planElems[key]; !exists {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		diags.AddWarning("Parameter removed from configuration",
+			fmt.Sprintf("Parameter %q was removed from the Terraform configuration but cannot be unset on the server. "+
+				"It retains its current value in %s.", key, where))
 	}
 }
 

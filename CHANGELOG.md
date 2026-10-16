@@ -11,6 +11,20 @@ BREAKING CHANGES:
 BUG FIXES:
 * An invalid service, namespace or set parameter key no longer leaves some of the valid keys applied — all keys are validated before any command is sent
 
+## 0.6.1
+BUG FIXES:
+* The provider no longer crashes on a root CA file that holds no valid certificate (it dereferenced a nil error), or on any connection error other than a timeout, such as wrong credentials or an unreachable host. Both are now reported as errors.
+* `aerospike_user` and `aerospike_role` no longer crash the provider when a server call fails. Creating a user that already exists now reports "User already exists", matching roles.
+* An asinfo response is treated as an error only when it starts with `ERROR`. Before, any response containing "error" anywhere failed, so a set index or set named, say, `consumer-errors-idx` was created and then broke every refresh of its namespace.
+* `aerospike_xdr_dc_config`: a create that fails after the datacenter exists (for example on an invalid DC or namespace parameter) now removes the datacenter again. Before, it stayed on the server outside state, and every later apply failed trying to create it.
+* `aerospike_xdr_dc_config`: refresh now detects namespaces and nodes detached from the datacenter outside Terraform, and the next apply re-adds them. Before, they were never noticed.
+* `aerospike_role` keeps the configured order of `white_list` on refresh, so a non-sorted whitelist no longer risks a permanent diff.
+* Removing the whole `params` map from `aerospike_service_config`, `aerospike_namespace_config` or `aerospike_xdr_dc_config` now warns that the values stay on the server, as removing a single key already did.
+
+ENHANCEMENTS:
+* `aerospike_user` `roles` and `aerospike_role` `white_list` reject duplicate entries at plan time. The server keeps only one copy, which caused a permanent diff.
+* Much wider test coverage: unit tests for environment overrides, privilege conversion, XDR validation and helpers, set-index ownership decisions, and response parsing; acceptance tests for provider connection errors, out-of-band drift (XDR membership, `ship-only-specified-sets`, deleted set indexes), import errors, identifier validation, and version gating of `aerospike_sindex`.
+
 ## 0.6.0
 FEATURES:
 * New `aerospike_sindex` resource for set indexes on Aerospike Database 8.1.2+ (`sindex-create` / `sindex-delete` with `indextype=set`). Creating a set index on a config-owned index (`enable-index`) converts ownership in place — no rebuild. Changing `name` renames the SMD index rather than deleting and recreating it. Destroy uses `sindex-delete` only.

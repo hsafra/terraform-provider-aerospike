@@ -191,15 +191,7 @@ func (r *AerospikeServiceConfig) Update(ctx context.Context, req resource.Update
 	}
 
 	// Warn about removed service params
-	if !state.Params.IsNull() && !plan.Params.IsNull() {
-		for key := range state.Params.Elements() {
-			if _, exists := plan.Params.Elements()[key]; !exists {
-				resp.Diagnostics.AddWarning("Parameter removed from configuration",
-					fmt.Sprintf("Parameter %q was removed from the Terraform configuration but cannot be unset on the server. "+
-						"It retains its current value in the service context.", key))
-			}
-		}
-	}
+	warnRemovedParams(&resp.Diagnostics, state.Params, plan.Params, "the service context")
 
 	cmdList, diags := infoCommandsList(ctx, infoCommands)
 	resp.Diagnostics.Append(diags...)

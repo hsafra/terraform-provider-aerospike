@@ -10,6 +10,7 @@ import (
 	astypes "github.com/aerospike/aerospike-client-go/v8/types"
 	"github.com/ghetzel/go-stockutil/sliceutil"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -108,9 +109,12 @@ func (r *AerospikeRole) Schema(ctx context.Context, req resource.SchemaRequest, 
 				},
 			},
 			"white_list": schema.ListAttribute{
-				Description: "A list of IP addresses allowed to connect.",
+				Description: "A list of IP addresses allowed to connect. Each address may appear only once.",
 				Optional:    true,
 				ElementType: types.StringType,
+				Validators: []validator.List{
+					listvalidator.UniqueValues(),
+				},
 			},
 			"read_quota": schema.Int64Attribute{
 				Description: "Read quota to apply to the role",
@@ -205,7 +209,9 @@ func (r *AerospikeRole) Create(ctx context.Context, req resource.CreateRequest, 
 				"Role that was being created already exists: "+roleName))
 			return
 		default:
-			panic(err)
+			resp.Diagnostics.AddError("Error creating role",
+				fmt.Sprintf("Failed to create role %q: %s", roleName, err.Error()))
+			return
 		}
 	}
 
@@ -232,7 +238,9 @@ func (r *AerospikeRole) Read(ctx context.Context, req resource.ReadRequest, resp
 
 	role, err := r.asConn.client.QueryRole(adminPol, data.Role_name.ValueString())
 	if err != nil && !err.Matches(astypes.INVALID_ROLE) {
-		panic(err)
+		resp.Diagnostics.AddError("Error reading role",
+			fmt.Sprintf("Failed to query role %q: %s", data.Role_name.ValueString(), err.Error()))
+		return
 	}
 
 	if err != nil && err.Matches(astypes.INVALID_ROLE) {
@@ -265,10 +273,7 @@ func (r *AerospikeRole) Read(ctx context.Context, req resource.ReadRequest, resp
 	if len(role.Whitelist) == 0 {
 		data.White_list = nil
 	} else {
-		data.White_list = make([]types.String, 0)
-		for _, w := range role.Whitelist {
-			data.White_list = append(data.White_list, types.StringValue(w))
-		}
+		data.White_list = orderLikePrior(data.White_list, role.Whitelist)
 	}
 
 	data.Read_quota = types.Int64Value(int64(role.ReadQuota))
@@ -347,13 +352,17 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 		if len(privsToAdd) > 0 {
 			err := r.asConn.client.GrantPrivileges(adminPol, plan.Role_name.ValueString(), privsToAdd)
 			if err != nil {
-				panic(err)
+				resp.Diagnostics.AddError("Error granting privileges",
+					fmt.Sprintf("Failed to grant privileges to role %q: %s", plan.Role_name.ValueString(), err.Error()))
+				return
 			}
 		}
 		if len(privsToRevoke) > 0 {
 			err := r.asConn.client.RevokePrivileges(adminPol, plan.Role_name.ValueString(), privsToRevoke)
 			if err != nil {
-				panic(err)
+				resp.Diagnostics.AddError("Error revoking privileges",
+					fmt.Sprintf("Failed to revoke privileges from role %q: %s", plan.Role_name.ValueString(), err.Error()))
+				return
 			}
 		}
 
@@ -369,7 +378,9 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 		}
 		err := r.asConn.client.SetWhitelist(adminPol, data.Role_name.ValueString(), whiteList)
 		if err != nil {
-			panic(err)
+			resp.Diagnostics.AddError("Error setting whitelist",
+				fmt.Sprintf("Failed to set whitelist on role %q: %s", data.Role_name.ValueString(), err.Error()))
+			return
 		}
 	}
 	data.White_list = plan.White_list
@@ -382,7 +393,9 @@ func (r *AerospikeRole) Update(ctx context.Context, req resource.UpdateRequest, 
 			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Quotas not enabled", "Role quotas are requests but not enabled in the server"))
 			return
 		} else if err != nil {
-			panic(err)
+			resp.Diagnostics.AddError("Error setting quotas",
+				fmt.Sprintf("Failed to set quotas on role %q: %s", data.Role_name.ValueString(), err.Error()))
+			return
 		}
 	}
 	data.Read_quota = plan.Read_quota
@@ -406,7 +419,9 @@ func (r *AerospikeRole) Delete(ctx context.Context, req resource.DeleteRequest, 
 
 	err := r.asConn.client.DropRole(adminPol, data.Role_name.ValueString())
 	if err != nil && !err.Matches(astypes.INVALID_ROLE) {
-		panic(err)
+		resp.Diagnostics.AddError("Error dropping role",
+			fmt.Sprintf("Failed to drop role %q: %s", data.Role_name.ValueString(), err.Error()))
+		return
 	}
 
 	// Write logs using the tflog package

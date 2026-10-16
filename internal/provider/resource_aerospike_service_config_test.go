@@ -454,3 +454,26 @@ resource "terraform_data" "consumer" {
   input = aerospike_service_config.test.info_commands
 }`, protoFdMax)
 }
+
+// Removing the whole params map applies cleanly (with a warning per key) and
+// leaves the values on the server.
+func TestAccAerospikeServiceConfig_removeAllParams(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccServiceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeServiceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccServiceConfigWithParam("proto-fd-max", "24000"),
+				Check:  testAccCheckServiceParam("proto-fd-max", "24000"),
+			},
+			{
+				Config: `resource "aerospike_service_config" "test" {}`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("aerospike_service_config.test", "params.%"),
+					testAccCheckServiceParam("proto-fd-max", "24000"),
+				),
+			},
+		},
+	})
+}
