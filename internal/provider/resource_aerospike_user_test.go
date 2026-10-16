@@ -27,14 +27,22 @@ func testAccCheckAerospikeUserDestroy(s *terraform.State) error {
 			continue
 		}
 
-		adminPol := as.NewAdminPolicy()
-		_, queryErr := client.QueryUser(adminPol, rs.Primary.Attributes["user_name"])
-		if queryErr == nil {
-			return fmt.Errorf("aerospike user %s still exists", rs.Primary.Attributes["user_name"])
+		userName := rs.Primary.Attributes["user_name"]
+		if err := testAccEventually(func() error { return testAccUserAbsent(client, userName) }); err != nil {
+			return err
 		}
-		if !queryErr.Matches(astypes.INVALID_USER) {
-			return fmt.Errorf("unexpected error checking user %s: %w", rs.Primary.Attributes["user_name"], queryErr)
-		}
+	}
+	return nil
+}
+
+// testAccUserAbsent queries the server once and returns an error unless the user is gone.
+func testAccUserAbsent(client *as.Client, userName string) error {
+	_, queryErr := client.QueryUser(as.NewAdminPolicy(), userName)
+	if queryErr == nil {
+		return fmt.Errorf("aerospike user %s still exists", userName)
+	}
+	if !queryErr.Matches(astypes.INVALID_USER) {
+		return fmt.Errorf("unexpected error checking user %s: %w", userName, queryErr)
 	}
 	return nil
 }
@@ -171,34 +179,38 @@ func testAccCheckUserHasRoles(userName string, expectedRoles []string) resource.
 		}
 		defer client.Close()
 
-		adminPol := as.NewAdminPolicy()
-		user, queryErr := client.QueryUser(adminPol, userName)
-		if queryErr != nil {
-			return fmt.Errorf("failed to query user %s: %w", userName, queryErr)
-		}
-
-		actualSet := make(map[string]bool)
-		for _, r := range user.Roles {
-			if r != "" {
-				actualSet[r] = true
-			}
-		}
-
-		expectedSet := make(map[string]bool)
-		for _, r := range expectedRoles {
-			expectedSet[r] = true
-		}
-
-		if len(actualSet) != len(expectedSet) {
-			return fmt.Errorf("user %s: expected roles %v, got %v", userName, expectedRoles, user.Roles)
-		}
-		for r := range expectedSet {
-			if !actualSet[r] {
-				return fmt.Errorf("user %s: expected role %q not found, got %v", userName, r, user.Roles)
-			}
-		}
-		return nil
+		return testAccEventually(func() error { return testAccUserRolesMatch(client, userName, expectedRoles) })
 	}
+}
+
+// testAccUserRolesMatch queries the server once and compares the user's roles to expectedRoles.
+func testAccUserRolesMatch(client *as.Client, userName string, expectedRoles []string) error {
+	user, queryErr := client.QueryUser(as.NewAdminPolicy(), userName)
+	if queryErr != nil {
+		return fmt.Errorf("failed to query user %s: %w", userName, queryErr)
+	}
+
+	actualSet := make(map[string]bool)
+	for _, r := range user.Roles {
+		if r != "" {
+			actualSet[r] = true
+		}
+	}
+
+	expectedSet := make(map[string]bool)
+	for _, r := range expectedRoles {
+		expectedSet[r] = true
+	}
+
+	if len(actualSet) != len(expectedSet) {
+		return fmt.Errorf("user %s: expected roles %v, got %v", userName, expectedRoles, user.Roles)
+	}
+	for r := range expectedSet {
+		if !actualSet[r] {
+			return fmt.Errorf("user %s: expected role %q not found, got %v", userName, r, user.Roles)
+		}
+	}
+	return nil
 }
 
 // #5: Server-side role validation for users.
@@ -306,6 +318,9 @@ func TestAccAerospikeUser_disappearsOutsideTerraform(t *testing.T) {
 					defer client.Close()
 					adminPol := as.NewAdminPolicy()
 					_ = client.DropUser(adminPol, "testuser_disappear")
+					if err := testAccEventually(func() error { return testAccUserAbsent(client, "testuser_disappear") }); err != nil {
+						t.Fatalf("user drop did not propagate: %s", err)
+					}
 				},
 				Config: testAccAerospikeUserConfig("testuser_disappear", "testpass1", `"read"`),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -354,15 +369,7 @@ func testAccCheckUserNotExists(userName string) resource.TestCheckFunc {
 		}
 		defer client.Close()
 
-		adminPol := as.NewAdminPolicy()
-		_, queryErr := client.QueryUser(adminPol, userName)
-		if queryErr == nil {
-			return fmt.Errorf("user %s still exists, expected it to be deleted", userName)
-		}
-		if !queryErr.Matches(astypes.INVALID_USER) {
-			return fmt.Errorf("unexpected error checking user %s: %w", userName, queryErr)
-		}
-		return nil
+		return testAccEventually(func() error { return testAccUserAbsent(client, userName) })
 	}
 }
 
@@ -428,6 +435,9 @@ func TestAccAerospikeUser_userAlreadyExists(t *testing.T) {
 			}
 			defer client.Close()
 			_ = client.CreateUser(as.NewAdminPolicy(), "testuser_preexist", "testpass1", []string{"read"})
+			if err := testAccEventually(func() error { return testAccUserRolesMatch(client, "testuser_preexist", []string{"read"}) }); err != nil {
+				t.Fatalf("user create did not propagate: %s", err)
+			}
 		},
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		CheckDestroy: func(s *terraform.State) error {

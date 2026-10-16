@@ -28,14 +28,30 @@ func testAccCheckAerospikeRoleDestroy(s *terraform.State) error {
 			continue
 		}
 
-		adminPol := as.NewAdminPolicy()
-		_, queryErr := client.QueryRole(adminPol, rs.Primary.Attributes["role_name"])
-		if queryErr == nil {
-			return fmt.Errorf("aerospike role %s still exists", rs.Primary.Attributes["role_name"])
+		roleName := rs.Primary.Attributes["role_name"]
+		if err := testAccEventually(func() error { return testAccRoleAbsent(client, roleName) }); err != nil {
+			return err
 		}
-		if !queryErr.Matches(astypes.INVALID_ROLE) {
-			return fmt.Errorf("unexpected error checking role %s: %w", rs.Primary.Attributes["role_name"], queryErr)
-		}
+	}
+	return nil
+}
+
+// testAccRoleAbsent queries the server once and returns an error unless the role is gone.
+func testAccRoleAbsent(client *as.Client, roleName string) error {
+	_, queryErr := client.QueryRole(as.NewAdminPolicy(), roleName)
+	if queryErr == nil {
+		return fmt.Errorf("aerospike role %s still exists", roleName)
+	}
+	if !queryErr.Matches(astypes.INVALID_ROLE) {
+		return fmt.Errorf("unexpected error checking role %s: %w", roleName, queryErr)
+	}
+	return nil
+}
+
+// testAccRolePresent queries the server once and returns an error unless the role exists.
+func testAccRolePresent(client *as.Client, roleName string) error {
+	if _, queryErr := client.QueryRole(as.NewAdminPolicy(), roleName); queryErr != nil {
+		return fmt.Errorf("role %s does not exist: %w", roleName, queryErr)
 	}
 	return nil
 }
@@ -316,6 +332,9 @@ func TestAccAerospikeRole_roleAlreadyExists(t *testing.T) {
 			_ = client.CreateRole(adminPol, "testrole_preexist", []as.Privilege{
 				{Code: as.Read},
 			}, nil, 0, 0)
+			if err := testAccEventually(func() error { return testAccRolePresent(client, "testrole_preexist") }); err != nil {
+				t.Fatalf("role create did not propagate: %s", err)
+			}
 		},
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		CheckDestroy: func(s *terraform.State) error {
@@ -361,6 +380,9 @@ func TestAccAerospikeRole_disappearsOutsideTerraform(t *testing.T) {
 					defer client.Close()
 					adminPol := as.NewAdminPolicy()
 					_ = client.DropRole(adminPol, "testrole_disappear")
+					if err := testAccEventually(func() error { return testAccRoleAbsent(client, "testrole_disappear") }); err != nil {
+						t.Fatalf("role drop did not propagate: %s", err)
+					}
 				},
 				Config: testAccAerospikeRoleMinimalConfig("testrole_disappear", `[{privilege="read"}]`),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -438,12 +460,7 @@ func testAccCheckRoleExists(roleName string) resource.TestCheckFunc {
 		}
 		defer client.Close()
 
-		adminPol := as.NewAdminPolicy()
-		_, queryErr := client.QueryRole(adminPol, roleName)
-		if queryErr != nil {
-			return fmt.Errorf("role %s does not exist: %w", roleName, queryErr)
-		}
-		return nil
+		return testAccEventually(func() error { return testAccRolePresent(client, roleName) })
 	}
 }
 
@@ -456,15 +473,7 @@ func testAccCheckRoleNotExists(roleName string) resource.TestCheckFunc {
 		}
 		defer client.Close()
 
-		adminPol := as.NewAdminPolicy()
-		_, queryErr := client.QueryRole(adminPol, roleName)
-		if queryErr == nil {
-			return fmt.Errorf("role %s still exists, expected it to be deleted", roleName)
-		}
-		if !queryErr.Matches(astypes.INVALID_ROLE) {
-			return fmt.Errorf("unexpected error checking role %s: %w", roleName, queryErr)
-		}
-		return nil
+		return testAccEventually(func() error { return testAccRoleAbsent(client, roleName) })
 	}
 }
 
