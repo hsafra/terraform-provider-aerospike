@@ -30,7 +30,7 @@ resource "aerospike_user" "test2" {
 
 ### Optional
 
-- `roles` (List of String) Roles that should be granted to the user
+- `roles` (List of String) Roles that should be granted to the user. Each role may appear only once.
 
 ## Import
 

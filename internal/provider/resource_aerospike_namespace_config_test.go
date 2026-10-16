@@ -682,3 +682,39 @@ resource "aerospike_namespace_config" "test" {
   }
 }`
 }
+
+// Removing the whole params map applies cleanly (with a warning per key) and
+// leaves the values on the server.
+func TestAccAerospikeNamespaceConfig_removeAllParams(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccNamespaceConfigPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeNamespaceConfigDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccNamespaceConfigWithSetConfig(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "params.default-ttl", "100"),
+					testAccCheckNamespaceParam("aerospike", "default-ttl", "100"),
+				),
+			},
+			{
+				Config: `
+resource "aerospike_namespace_config" "test" {
+  namespace = "aerospike"
+
+  set_config = {
+    "testset1" = {
+      "stop-writes-count" = "50000"
+    }
+  }
+}`,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("aerospike_namespace_config.test", "params.%"),
+					resource.TestCheckResourceAttr("aerospike_namespace_config.test", "set_config.testset1.stop-writes-count", "50000"),
+					testAccCheckNamespaceParam("aerospike", "default-ttl", "100"),
+				),
+			},
+		},
+	})
+}

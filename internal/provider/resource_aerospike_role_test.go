@@ -10,6 +10,7 @@ import (
 
 	as "github.com/aerospike/aerospike-client-go/v8"
 	astypes "github.com/aerospike/aerospike-client-go/v8/types"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -527,4 +528,111 @@ func sanitizeRoleName(name string) string {
 		}
 	}
 	return string(result)
+}
+
+// Privilege names round-trip through the Aerospike client types unchanged.
+func TestAsPrivRoundTrip(t *testing.T) {
+	privNames := []string{"user-admin", "sys-admin", "data-admin", "udf-admin", "sindex-admin",
+		"read-write-udf", "read-write", "read", "write", "truncate"}
+	scopes := []struct {
+		name      string
+		namespace types.String
+		set       types.String
+	}{
+		{"global", types.StringNull(), types.StringNull()},
+		{"namespace", types.StringValue("aerospike"), types.StringNull()},
+		{"namespace and set", types.StringValue("aerospike"), types.StringValue("set1")},
+	}
+	for _, priv := range privNames {
+		for _, scope := range scopes {
+			t.Run(priv+"/"+scope.name, func(t *testing.T) {
+				asPriv := asPrivFromStringValues(types.StringValue(priv), scope.namespace, scope.set)
+				gotPriv, gotNs, gotSet := asPrivToStringValues(asPriv)
+				if gotPriv.ValueString() != priv {
+					t.Errorf("privilege = %q, want %q", gotPriv.ValueString(), priv)
+				}
+				if !gotNs.Equal(scope.namespace) {
+					t.Errorf("namespace = %v, want %v", gotNs, scope.namespace)
+				}
+				if !gotSet.Equal(scope.set) {
+					t.Errorf("set = %v, want %v", gotSet, scope.set)
+				}
+			})
+		}
+	}
+}
+
+// An empty namespace or set from the server reads back as null, matching an
+// unset attribute in config.
+func TestAsPrivToStringValuesEmptyScopeIsNull(t *testing.T) {
+	_, ns, set := asPrivToStringValues(as.Privilege{Code: as.Read})
+	if !ns.IsNull() || !set.IsNull() {
+		t.Errorf("got namespace=%v set=%v, want both null", ns, set)
+	}
+}
+
+// Update validates namespaces too, not only Create.
+func TestAccAerospikeRole_invalidNamespaceOnUpdate(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeRoleDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAerospikeRoleMinimalConfig("testrole_upd_ns", `[{privilege="read", namespace="aerospike"}]`),
+				Check:  testAccCheckRoleExists("testrole_upd_ns"),
+			},
+			{
+				Config:      testAccAerospikeRoleMinimalConfig("testrole_upd_ns", `[{privilege="read", namespace="nonexistent_ns"}]`),
+				ExpectError: regexp.MustCompile(`Invalid namesace|does not exist`),
+			},
+		},
+	})
+}
+
+// A whitelist in non-sorted order must not produce a perpetual diff, whatever
+// order the server returns it in.
+func TestAccAerospikeRole_whitelistOrderPreserved(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeRoleDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAerospikeRoleConfig("testrole_wl_order", `[{privilege="read"}]`, `["10.0.0.9", "10.0.0.1", "10.0.0.5"]`),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_role.testrole_wl_order", "white_list.0", "10.0.0.9"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_wl_order", "white_list.1", "10.0.0.1"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_wl_order", "white_list.2", "10.0.0.5"),
+				),
+			},
+			{
+				RefreshState: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("aerospike_role.testrole_wl_order", "white_list.0", "10.0.0.9"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_wl_order", "white_list.1", "10.0.0.1"),
+					resource.TestCheckResourceAttr("aerospike_role.testrole_wl_order", "white_list.2", "10.0.0.5"),
+				),
+			},
+			{
+				Config:   testAccAerospikeRoleConfig("testrole_wl_order", `[{privilege="read"}]`, `["10.0.0.9", "10.0.0.1", "10.0.0.5"]`),
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// Duplicate whitelist entries are rejected at plan time; the server would
+// collapse them and cause a perpetual diff.
+func TestAccAerospikeRole_duplicateWhitelistRejected(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccAerospikeRoleConfig("testrole_wl_dup", `[{privilege="read"}]`, `["10.0.0.1", "10.0.0.1"]`),
+				ExpectError: regexp.MustCompile(`(?i)duplicate|unique`),
+			},
+		},
+	})
 }

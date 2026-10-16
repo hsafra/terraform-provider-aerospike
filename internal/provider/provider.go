@@ -4,13 +4,10 @@
 package provider
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"time"
@@ -166,31 +163,8 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 
 		// read the root ca if supplied
 		if !dataTLS.RootCAFile.IsNull() {
-			file, err := os.Open(dataTLS.RootCAFile.ValueString())
+			roots, err := loadRootCAs(dataTLS.RootCAFile.ValueString())
 			if err != nil {
-				resp.Diagnostics.Append(diag.NewErrorDiagnostic("Error reading root ca file", err.Error()))
-				return
-			}
-			defer file.Close()
-
-			// Get the file size
-			stat, err := file.Stat()
-			if err != nil {
-				resp.Diagnostics.Append(diag.NewErrorDiagnostic("Error reading root ca file", err.Error()))
-				return
-			}
-
-			// Read the file into a byte slice
-			bs := make([]byte, stat.Size())
-			_, err = bufio.NewReader(file).Read(bs)
-			if err != nil && !errors.Is(err, io.EOF) {
-				resp.Diagnostics.Append(diag.NewErrorDiagnostic("Error reading root ca file", err.Error()))
-				return
-			}
-
-			roots := x509.NewCertPool()
-			ok := roots.AppendCertsFromPEM(bs)
-			if !ok {
 				resp.Diagnostics.Append(diag.NewErrorDiagnostic("Error reading root ca file", err.Error()))
 				return
 			}
@@ -211,9 +185,10 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 			resp.Diagnostics.Append(diag.NewErrorDiagnostic("Timeout connecting to Aerospike",
 				"Timeout connecting to Aerospike cluster "+host+" "+err.Error()))
 			return
-		} else {
-			panic(err)
 		}
+		resp.Diagnostics.Append(diag.NewErrorDiagnostic("Error connecting to Aerospike",
+			"Could not connect to Aerospike cluster "+host+": "+err.Error()))
+		return
 	}
 
 	asConn.client = tempConn
@@ -239,6 +214,20 @@ func (p *AerospikeProvider) Configure(ctx context.Context, req provider.Configur
 
 	resp.DataSourceData = &asConn
 	resp.ResourceData = &asConn
+}
+
+// loadRootCAs reads a PEM file and returns a pool holding its certificates.
+// It fails when the file cannot be read or holds no valid PEM certificate.
+func loadRootCAs(path string) (*x509.CertPool, error) {
+	pem, err := os.ReadFile(path) //nolint:gosec // the path is the operator-supplied root_ca_file
+	if err != nil {
+		return nil, err
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("no valid PEM certificates found in %s", path)
+	}
+	return roots, nil
 }
 
 func (p *AerospikeProvider) Resources(ctx context.Context) []func() resource.Resource {

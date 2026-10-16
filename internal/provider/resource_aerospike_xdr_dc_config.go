@@ -6,8 +6,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -184,26 +186,17 @@ func (r *AerospikeXDRDCConfig) Create(ctx context.Context, req resource.CreateRe
 	}
 	infoCommands = append(infoCommands, cmd)
 
-	// Add nodes
-	resp.Diagnostics.Append(r.applyNodes(ctx, dc, data.NodeAddressPorts, &infoCommands)...)
+	// From here on the DC exists on the server but not yet in state. If any
+	// later step fails, remove it again so the next apply can create it from
+	// scratch instead of failing on "DC already exists".
+	resp.Diagnostics.Append(r.configureNewDC(ctx, dc, data, &infoCommands)...)
 	if resp.Diagnostics.HasError() {
+		if err := r.teardownDC(ctx, dc, data.Namespaces, data.NodeAddressPorts); err != nil {
+			resp.Diagnostics.AddWarning("Could not roll back XDR datacenter",
+				fmt.Sprintf("Creating datacenter %q failed part-way and it could not be removed again: %s. "+
+					"Remove it manually before the next apply.", dc, err.Error()))
+		}
 		return
-	}
-
-	// Apply DC-level params
-	if !data.Params.IsNull() && !data.Params.IsUnknown() {
-		resp.Diagnostics.Append(r.applyDCParams(ctx, dc, data.Params, &infoCommands)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-	}
-
-	// Add and configure namespaces
-	for _, ns := range data.Namespaces {
-		resp.Diagnostics.Append(r.addAndConfigureNamespace(ctx, dc, ns, &infoCommands)...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
 	}
 
 	// Build info_commands list
@@ -217,6 +210,32 @@ func (r *AerospikeXDRDCConfig) Create(ctx context.Context, req resource.CreateRe
 	tflog.Trace(ctx, "created XDR DC config for "+dc)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+// configureNewDC adds nodes, DC params and namespaces to a freshly created DC.
+func (r *AerospikeXDRDCConfig) configureNewDC(ctx context.Context, dc string, data AerospikeXDRDCConfigModel, infoCommands *[]string) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	diags.Append(r.applyNodes(ctx, dc, data.NodeAddressPorts, infoCommands)...)
+	if diags.HasError() {
+		return diags
+	}
+
+	if !data.Params.IsNull() && !data.Params.IsUnknown() {
+		diags.Append(r.applyDCParams(ctx, dc, data.Params, infoCommands)...)
+		if diags.HasError() {
+			return diags
+		}
+	}
+
+	for _, ns := range data.Namespaces {
+		diags.Append(r.addAndConfigureNamespace(ctx, dc, ns, infoCommands)...)
+		if diags.HasError() {
+			return diags
+		}
+	}
+
+	return diags
 }
 
 func (r *AerospikeXDRDCConfig) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -238,15 +257,19 @@ func (r *AerospikeXDRDCConfig) Read(ctx context.Context, req resource.ReadReques
 
 	// Read DC-level params from every node so cross-node divergence becomes
 	// a planned re-apply rather than a silently-masked drift.
-	if !data.Params.IsNull() {
-		priorDCState := stringMapFromTypesMap(data.Params)
-		serverConfig, divergences, err := getXDRDCConfigAllNodes(r.asConn.client, dc, priorDCState)
-		if err != nil {
-			resp.Diagnostics.AddError("Error reading XDR DC config",
-				fmt.Sprintf("Could not read config for DC %q: %s", dc, err.Error()))
-			return
-		}
+	priorDCState := stringMapFromTypesMap(data.Params)
+	serverConfig, divergences, err := getXDRDCConfigAllNodes(r.asConn.client, dc, priorDCState)
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading XDR DC config",
+			fmt.Sprintf("Could not read config for DC %q: %s", dc, err.Error()))
+		return
+	}
 
+	// Drop nodes and namespaces that were detached from the DC outside
+	// Terraform, so the next plan re-adds them.
+	data.NodeAddressPorts, data.Namespaces = refreshXDRMembership(serverConfig, data.NodeAddressPorts, data.Namespaces)
+
+	if !data.Params.IsNull() {
 		appendDivergenceWarnings(&resp.Diagnostics, divergences, priorDCState,
 			"XDR DC parameter differs across cluster nodes",
 			fmt.Sprintf("DC %q", dc))
@@ -383,14 +406,7 @@ func (r *AerospikeXDRDCConfig) Update(ctx context.Context, req resource.UpdateRe
 	}
 
 	// Warn about removed DC params
-	if !state.Params.IsNull() && !plan.Params.IsNull() {
-		for key := range state.Params.Elements() {
-			if _, exists := plan.Params.Elements()[key]; !exists {
-				resp.Diagnostics.AddWarning("Parameter removed from configuration",
-					fmt.Sprintf("DC parameter %q was removed from the Terraform configuration but cannot be unset on the server.", key))
-			}
-		}
-	}
+	warnRemovedParams(&resp.Diagnostics, state.Params, plan.Params, fmt.Sprintf("DC %q", dc))
 
 	// Diff namespaces
 	stateNsMap := make(map[string]XDRNamespaceModel)
@@ -455,38 +471,38 @@ func (r *AerospikeXDRDCConfig) Delete(ctx context.Context, req resource.DeleteRe
 
 	dc := data.DC.ValueString()
 
-	// Remove namespaces first
-	for _, ns := range data.Namespaces {
-		_, err := removeXDRDCNamespace(r.asConn.client, dc, ns.Name.ValueString())
-		if err != nil {
-			tflog.Trace(ctx, fmt.Sprintf("could not remove namespace %q from DC %q during destroy: %s",
-				ns.Name.ValueString(), dc, err.Error()))
-		}
-	}
-
-	// Remove nodes (required before DC can be deleted)
-	if !data.NodeAddressPorts.IsNull() {
-		for _, elem := range data.NodeAddressPorts.Elements() {
-			if addr, ok := elem.(types.String); ok {
-				_, err := removeXDRDCNode(r.asConn.client, dc, addr.ValueString())
-				if err != nil {
-					tflog.Trace(ctx, fmt.Sprintf("could not remove node %q from DC %q during destroy: %s",
-						addr.ValueString(), dc, err.Error()))
-				}
-			}
-		}
-	}
-
-	// Delete the DC (retries internally — Aerospike may need a moment
-	// after namespace/node removal before the DC can be deleted)
-	err := removeXDRDC(r.asConn.client, dc)
-	if err != nil {
+	if err := r.teardownDC(ctx, dc, data.Namespaces, data.NodeAddressPorts); err != nil {
 		resp.Diagnostics.AddError("Error removing XDR datacenter",
 			fmt.Sprintf("Failed to remove datacenter %q: %s", dc, err.Error()))
 		return
 	}
 
 	tflog.Trace(ctx, "destroyed XDR DC config for "+dc)
+}
+
+// teardownDC removes the given namespaces and nodes from dc, then deletes the
+// DC. Namespace and node removals are best-effort (they may already be gone);
+// only the DC deletion error is returned.
+func (r *AerospikeXDRDCConfig) teardownDC(ctx context.Context, dc string, namespaces []XDRNamespaceModel, nodes types.List) error {
+	for _, ns := range namespaces {
+		_, err := removeXDRDCNamespace(r.asConn.client, dc, ns.Name.ValueString())
+		if err != nil {
+			tflog.Trace(ctx, fmt.Sprintf("could not remove namespace %q from DC %q: %s",
+				ns.Name.ValueString(), dc, err.Error()))
+		}
+	}
+
+	// Remove nodes (required before DC can be deleted)
+	for _, addr := range extractStringList(nodes) {
+		_, err := removeXDRDCNode(r.asConn.client, dc, addr)
+		if err != nil {
+			tflog.Trace(ctx, fmt.Sprintf("could not remove node %q from DC %q: %s", addr, dc, err.Error()))
+		}
+	}
+
+	// Delete the DC (retries internally — Aerospike may need a moment
+	// after namespace/node removal before the DC can be deleted)
+	return removeXDRDC(r.asConn.client, dc)
 }
 
 func (r *AerospikeXDRDCConfig) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
@@ -940,6 +956,61 @@ func extractStringSlice(s types.Set) []string {
 		return result
 	}
 	for _, elem := range s.Elements() {
+		if str, ok := elem.(types.String); ok {
+			result = append(result, str.ValueString())
+		}
+	}
+	return result
+}
+
+// refreshXDRMembership filters the nodes and namespaces in state down to those
+// the server still lists for the DC (get-config keys "node-address-port" and
+// "namespaces", both comma-separated). A key the server does not report leaves
+// the matching state untouched. Order in state is preserved.
+func refreshXDRMembership(serverConfig map[string]string, nodes types.List, namespaces []XDRNamespaceModel) (types.List, []XDRNamespaceModel) {
+	if raw, ok := serverConfig["node-address-port"]; ok && !nodes.IsNull() && !nodes.IsUnknown() {
+		onServer := toStringSet(splitCommaList(raw))
+		kept := make([]attr.Value, 0, len(nodes.Elements()))
+		for _, addr := range extractStringList(nodes) {
+			if onServer[addr] {
+				kept = append(kept, types.StringValue(addr))
+			}
+		}
+		nodes = types.ListValueMust(types.StringType, kept)
+	}
+
+	if raw, ok := serverConfig["namespaces"]; ok && namespaces != nil {
+		onServer := toStringSet(splitCommaList(raw))
+		kept := make([]XDRNamespaceModel, 0, len(namespaces))
+		for _, ns := range namespaces {
+			if onServer[ns.Name.ValueString()] {
+				kept = append(kept, ns)
+			}
+		}
+		namespaces = kept
+	}
+
+	return nodes, namespaces
+}
+
+// splitCommaList splits a comma-separated info value, dropping empty entries.
+func splitCommaList(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// extractStringList extracts a []string from a types.List.
+func extractStringList(l types.List) []string {
+	var result []string
+	if l.IsNull() || l.IsUnknown() {
+		return result
+	}
+	for _, elem := range l.Elements() {
 		if str, ok := elem.(types.String); ok {
 			result = append(result, str.ValueString())
 		}

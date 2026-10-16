@@ -282,15 +282,7 @@ func (r *AerospikeNamespaceConfig) Update(ctx context.Context, req resource.Upda
 	}
 
 	// Warn about removed namespace params
-	if !state.Params.IsNull() && !plan.Params.IsNull() {
-		for key := range state.Params.Elements() {
-			if _, exists := plan.Params.Elements()[key]; !exists {
-				resp.Diagnostics.AddWarning("Parameter removed from configuration",
-					fmt.Sprintf("Parameter %q was removed from the Terraform configuration but cannot be unset on the server. "+
-						"It retains its current value on namespace %q.", key, namespace))
-			}
-		}
-	}
+	warnRemovedParams(&resp.Diagnostics, state.Params, plan.Params, fmt.Sprintf("namespace %q", namespace))
 
 	warnRemovedSetConfig(&resp.Diagnostics, state.SetConfig, plan.SetConfig, namespace)
 

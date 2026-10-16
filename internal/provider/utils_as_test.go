@@ -598,3 +598,190 @@ func TestWarnRemovedSetConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestInfoResponseError(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{"ok", "ok", false},
+		{"empty", "", false},
+		{"error with code", "ERROR:4:invalid set-config parameter", true},
+		{"lowercase error", "error::bad command", true},
+		{"leading whitespace", "  ERROR:81:role violation", true},
+		// sindex-list embeds user-chosen names; "error" inside a name is not an error.
+		{"name containing error", "ns=aerospike:indexname=consumer-errors-idx:set=errors:indextype=set:state=RW", false},
+		{"config value containing error", "log-level=error;proto-fd-max=15000", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := infoResponseError("cmd", tt.value)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("infoResponseError(%q) error = %v, wantErr %v", tt.value, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func stringMap(m map[string]string) types.Map {
+	elems := make(map[string]attr.Value, len(m))
+	for k, v := range m {
+		elems[k] = types.StringValue(v)
+	}
+	return types.MapValueMust(types.StringType, elems)
+}
+
+func TestWarnRemovedParams(t *testing.T) {
+	state := stringMap(map[string]string{"a": "1", "b": "2"})
+
+	tests := []struct {
+		name     string
+		state    types.Map
+		plan     types.Map
+		wantKeys []string
+	}{
+		{"nothing removed", state, stringMap(map[string]string{"a": "1", "b": "3"}), nil},
+		{"one key removed", state, stringMap(map[string]string{"a": "1"}), []string{"b"}},
+		{"whole map removed warns for every key", state, types.MapNull(types.StringType), []string{"a", "b"}},
+		{"unknown plan does not warn", state, types.MapUnknown(types.StringType), nil},
+		{"null state does not warn", types.MapNull(types.StringType), types.MapNull(types.StringType), nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var diags diag.Diagnostics
+			warnRemovedParams(&diags, tt.state, tt.plan, `namespace "aerospike"`)
+			if len(diags) != len(tt.wantKeys) {
+				t.Fatalf("got %d diags, want %d: %v", len(diags), len(tt.wantKeys), diags)
+			}
+			for i, key := range tt.wantKeys {
+				if diags[i].Severity() != diag.SeverityWarning {
+					t.Errorf("diag %d is not a warning: %v", i, diags[i])
+				}
+				if !strings.Contains(diags[i].Detail(), `"`+key+`"`) || !strings.Contains(diags[i].Detail(), `namespace "aerospike"`) {
+					t.Errorf("diag %d detail %q should name key %q and the context", i, diags[i].Detail(), key)
+				}
+			}
+		})
+	}
+}
+
+func TestSkipEnableIndexBranches(t *testing.T) {
+	tests := []struct {
+		name        string
+		value       string
+		supports    bool
+		smdOwned    bool
+		wantSkip    bool
+		wantError   bool
+		wantWarning string
+	}{
+		{"pre-8.1.2 always sends", "true", false, false, false, false, ""},
+		{"pre-8.1.2 ignores ownership", "false", false, true, false, false, ""},
+		{"SMD-owned true is skipped with a warning", "true", true, true, true, false, "SMD-owned"},
+		{"SMD-owned false is rejected", "false", true, true, true, true, ""},
+		{"SMD-owned FALSE is rejected case-insensitively", "FALSE", true, true, true, true, ""},
+		{"config-owned on 8.1.2 sends with deprecation warning", "true", true, false, false, false, "deprecated"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			skip, diags := skipEnableIndex("aerospike", "set1", tt.value, tt.supports, tt.smdOwned)
+			if skip != tt.wantSkip {
+				t.Errorf("skip = %v, want %v", skip, tt.wantSkip)
+			}
+			if diags.HasError() != tt.wantError {
+				t.Errorf("HasError = %v, want %v: %v", diags.HasError(), tt.wantError, diags)
+			}
+			if tt.wantWarning == "" {
+				if diags.WarningsCount() != 0 {
+					t.Errorf("unexpected warnings: %v", diags)
+				}
+				return
+			}
+			if diags.WarningsCount() != 1 || !strings.Contains(diags[0].Summary(), tt.wantWarning) {
+				t.Errorf("want one warning containing %q, got %v", tt.wantWarning, diags)
+			}
+		})
+	}
+}
+
+func TestWarnRemovedSetConfigNullPlan(t *testing.T) {
+	innerT := types.MapType{ElemType: types.StringType}
+	state := setConfigMap(map[string]map[string]string{
+		"set1": {"default-ttl": "0"},
+		"set2": {"default-ttl": "1"},
+	})
+	var diags diag.Diagnostics
+	warnRemovedSetConfig(&diags, state, types.MapNull(innerT), "aerospike")
+	if len(diags) != 2 {
+		t.Fatalf("removing set_config entirely should warn once per set, got %d: %v", len(diags), diags)
+	}
+}
+
+func TestParseSindexListVariants(t *testing.T) {
+	t.Run("namespace key instead of ns", func(t *testing.T) {
+		got := parseSindexList("namespace=aerospike:indexname=idx:set=s1:indextype=set:state=RW")
+		if len(got) != 1 || got[0].Namespace != "aerospike" {
+			t.Fatalf("got %+v", got)
+		}
+	})
+
+	t.Run("malformed and empty entries are skipped", func(t *testing.T) {
+		got := parseSindexList("garbage;;ns=aerospike:indexname=idx:set=s1:indextype=set;")
+		if len(got) != 1 || got[0].Name != "idx" {
+			t.Fatalf("got %+v", got)
+		}
+	})
+
+	t.Run("whitespace around response", func(t *testing.T) {
+		if got := parseSindexList("  \n"); len(got) != 0 {
+			t.Errorf("got %+v", got)
+		}
+		if got := parseSindexList("OK"); len(got) != 0 {
+			t.Errorf("OK should parse as empty, got %+v", got)
+		}
+	})
+}
+
+func TestAppendDivergenceWarnings(t *testing.T) {
+	divergences := []nodeDivergence{
+		{Key: "managed", NodeValues: map[string]string{"n2": "b", "n1": "a"}},
+		{Key: "unmanaged", NodeValues: map[string]string{"n1": "x", "n2": "y"}},
+	}
+	managed := map[string]string{"managed": "a"}
+
+	t.Run("with context", func(t *testing.T) {
+		var diags diag.Diagnostics
+		appendDivergenceWarnings(&diags, divergences, managed, "summary", `namespace "aerospike"`)
+		if len(diags) != 1 {
+			t.Fatalf("only managed keys should warn, got %d: %v", len(diags), diags)
+		}
+		detail := diags[0].Detail()
+		if !strings.Contains(detail, `on namespace "aerospike"`) {
+			t.Errorf("detail should name the context: %s", detail)
+		}
+		// Node values are rendered sorted by node name.
+		if !strings.Contains(detail, `n1="a", n2="b"`) {
+			t.Errorf("detail should list node values in order: %s", detail)
+		}
+	})
+
+	t.Run("without context", func(t *testing.T) {
+		var diags diag.Diagnostics
+		appendDivergenceWarnings(&diags, divergences, managed, "summary", "")
+		if len(diags) != 1 {
+			t.Fatalf("got %d diags: %v", len(diags), diags)
+		}
+		if !strings.HasPrefix(diags[0].Detail(), `Parameter "managed" has different values`) {
+			t.Errorf("detail should not name a context: %s", diags[0].Detail())
+		}
+	})
+
+	t.Run("nothing managed", func(t *testing.T) {
+		var diags diag.Diagnostics
+		appendDivergenceWarnings(&diags, divergences, nil, "summary", "")
+		if len(diags) != 0 {
+			t.Errorf("got %v", diags)
+		}
+	})
+}

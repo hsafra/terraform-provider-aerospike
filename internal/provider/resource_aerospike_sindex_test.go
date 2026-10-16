@@ -607,3 +607,148 @@ func TestAccCreateSetSindexPrivilegeDenied(t *testing.T) {
 		t.Fatalf("expected privilege / sindex-admin error, got: %s", err)
 	}
 }
+
+// A set index deleted outside Terraform is recreated on the next apply.
+func TestAccAerospikeSindex_disappearsOutsideTerraform(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccSindexPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeSindexDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccSindexConfig("sidx_gone", "sidx_gone-idx"),
+				Check:  testAccCheckSetSindexPresent("aerospike", "sidx_gone", "sidx_gone-idx"),
+			},
+			{
+				PreConfig: func() {
+					client, err := testAccGetAerospikeClient()
+					if err != nil {
+						t.Fatalf("failed to get client: %s", err)
+					}
+					defer client.Close()
+					if _, err := deleteSetSindex(client, "aerospike", "sidx_gone", "sidx_gone-idx"); err != nil {
+						t.Fatalf("failed to delete set index outside Terraform: %s", err)
+					}
+				},
+				Config:             testAccSindexConfig("sidx_gone", "sidx_gone-idx"),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				Config: testAccSindexConfig("sidx_gone", "sidx_gone-idx"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckSetSindexPresent("aerospike", "sidx_gone", "sidx_gone-idx"),
+					testAccCheckSetIndexCount("aerospike", "sidx_gone", 1),
+				),
+			},
+		},
+	})
+}
+
+// A malformed import ID is rejected before reaching the server.
+func TestAccAerospikeSindex_importInvalidID(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccSindexPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:        testAccSindexConfig("sidx_badid", "sidx_badid-idx"),
+				ResourceName:  "aerospike_sindex.test",
+				ImportState:   true,
+				ImportStateId: "aerospike/only-two-parts",
+				ExpectError:   regexp.MustCompile("Invalid import ID"),
+			},
+		},
+	})
+}
+
+// Importing an index that does not exist fails instead of creating empty state.
+func TestAccAerospikeSindex_importNonexistent(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccSindexPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:        testAccSindexConfig("sidx_noimport", "sidx_noimport-idx"),
+				ResourceName:  "aerospike_sindex.test",
+				ImportState:   true,
+				ImportStateId: "aerospike/sidx_noimport/sidx_noimport-idx",
+				ExpectError:   regexp.MustCompile(`(?i)cannot import non-existent remote object`),
+			},
+		},
+	})
+}
+
+// Names the server cannot accept are rejected at plan time by the attribute validators.
+func TestAccAerospikeSindex_invalidIdentifiers(t *testing.T) {
+	tests := []struct {
+		name    string
+		setName string
+		index   string
+		wantErr string
+	}{
+		{"semicolon in name", "sidx_ident", "bad;name", "Invalid index name"},
+		{"slash in set", "bad/set", "sidx_ident-idx", "Invalid set"},
+		{"name too long", "sidx_ident", strings.Repeat("n", asSindexNameMaxLen+1), "Invalid index name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resource.Test(t, resource.TestCase{
+				PreCheck:                 func() { testAccSindexPreCheck(t) },
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:      testAccSindexConfig(tt.setName, tt.index),
+						ExpectError: regexp.MustCompile(tt.wantErr),
+					},
+				},
+			})
+		})
+	}
+}
+
+// An index whose name contains "error" is not mistaken for an error response
+// when it shows up in sindex-list.
+func TestAccAerospikeSindex_nameContainingError(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccSindexPreCheck(t) },
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckAerospikeSindexDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccSindexConfig("sidx_errors", "consumer-errors-idx"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckSetSindexPresent("aerospike", "sidx_errors", "consumer-errors-idx"),
+					resource.TestCheckResourceAttr("aerospike_sindex.test", "name", "consumer-errors-idx"),
+				),
+			},
+			{
+				RefreshState: true,
+				Check:        resource.TestCheckResourceAttr("aerospike_sindex.test", "name", "consumer-errors-idx"),
+			},
+		},
+	})
+}
+
+// On servers older than 8.1.2 the resource refuses to create a set index and
+// points at set_config enable-index instead.
+func TestAccAerospikeSindex_rejectedBeforeMinVersion(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			if os.Getenv(resource.EnvTfAcc) == "" {
+				t.Skipf("acceptance tests skipped unless env %s is set", resource.EnvTfAcc)
+			}
+			testAccPreCheck(t)
+			if testAccServerSupportsSetSindex(t) {
+				t.Skip("server supports set indexes; this test covers older servers")
+			}
+		},
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccSindexConfig("sidx_old", "sidx_old-idx"),
+				ExpectError: regexp.MustCompile(`require Aerospike 8\.1\.2\+`),
+			},
+		},
+	})
+}
