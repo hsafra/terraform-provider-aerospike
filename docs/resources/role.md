@@ -37,7 +37,7 @@ resource "aerospike_role" "role2" {
 ### Optional
 
 - `read_quota` (Number) Read quota to apply to the role
-- `white_list` (List of String) A list of IP addresses allowed to connect.
+- `white_list` (List of String) A list of IP addresses allowed to connect. Each address may appear only once.
 - `write_quota` (Number) write quota to apply to the role
 
 <a id="nestedatt--privileges"></a>
