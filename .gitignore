@@ -33,3 +33,6 @@ website/vendor
 
 # Keep windows files with windows line endings
 *.winfile eol=crlf
+
+# Aerospike EE feature key: downloaded in CI from a secret URL, never committed
+tests/features.conf
