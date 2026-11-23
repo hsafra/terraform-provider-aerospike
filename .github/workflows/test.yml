@@ -96,6 +96,23 @@ jobs:
           terraform_version: ${{ matrix.terraform }}
           terraform_wrapper: false
       - run: go mod download
+      # The EE feature key is not kept in the repo; it is downloaded at run time
+      # from a URL stored in a repository secret. Secrets are not passed to
+      # pull requests from forks, so those runs fail here.
+      - name: Fetch Aerospike feature key
+        working-directory: tests
+        env:
+          FEATURES_CONF_URL: ${{ secrets.AEROSPIKE_FEATURES_CONF_URL }}
+        run: |
+          if [ -z "$FEATURES_CONF_URL" ]; then
+            echo "::error::Secret AEROSPIKE_FEATURES_CONF_URL is not available (not set, or this is a fork PR)."
+            exit 1
+          fi
+          curl -fsS --retry 3 --retry-all-errors -o features.conf "$FEATURES_CONF_URL"
+          if ! grep -q '^feature-key-version' features.conf; then
+            echo "::error::Downloaded file does not look like an Aerospike feature key file."
+            exit 1
+          fi
       - name: Start Aerospike containers
         working-directory: tests
         run: |
